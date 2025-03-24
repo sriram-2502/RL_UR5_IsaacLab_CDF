@@ -11,7 +11,9 @@ from isaaclab.managers import TerminationTermCfg as DoneTerm
 from isaaclab.scene import InteractiveSceneCfg
 from isaaclab.utils import configclass
 from isaaclab.sensors import TiledCameraCfg
-
+from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
+from isaaclab.markers.config import FRAME_MARKER_CFG
+from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg, OffsetCfg  
 from . import mdp
 
 # Create custom UR5 robot configuration
@@ -30,6 +32,7 @@ UR5_GRIPPER_CFG = ArticulationCfg(
             sleep_threshold=0.005,
             stabilization_threshold=0.001,
         ),
+        copy_from_source=False,
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         pos=(0.0, 0.0, 0.88),  # Position the base of the robot
@@ -68,7 +71,10 @@ UR5_GRIPPER_CFG = ArticulationCfg(
     },
 )
 
-
+    
+marker_cfg = FRAME_MARKER_CFG.copy()
+marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
+marker_cfg.prim_path = "/Visuals/FrameTransformer"
 
 
 ##
@@ -82,33 +88,37 @@ class RlUr5SceneCfg(InteractiveSceneCfg):
     # Ground plane
     ground = AssetBaseCfg(
         prim_path="/World/ground",
-        spawn=sim_utils.GroundPlaneCfg(size=(10.0, 10.0)),
+        spawn=sim_utils.GroundPlaneCfg(),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),
     )
     # UR5 Robot
-    robot = UR5_GRIPPER_CFG.replace(prim_path="{ENV_REGEX_NS}/World")
-    
-    # Table configuration - greyish white
-    table = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/table",
-        spawn=sim_utils.CuboidCfg(
-            size=(1.83, 0.91, 0.76),  # L x W x H in meters (6 x 3 x 2.5 ft)
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                rigid_body_enabled=True,
-                max_linear_velocity=1000.0,
-                max_angular_velocity=1000.0,
-                max_depenetration_velocity=100.0,
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=50.0),  # Heavy table
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.9, 0.9, 0.9),  # Greyish white
-                metallic=0.1,
-                roughness=0.8
-            ),
+    robot = UR5_GRIPPER_CFG.replace(prim_path="{ENV_REGEX_NS}/robot")
+
+
+    # end-effector sensor: will be populated by agent env cfg
+    ee_frame: FrameTransformerCfg = FrameTransformerCfg(
+            prim_path="{ENV_REGEX_NS}/robot/base_link",
+            debug_vis=False,
+            visualizer_cfg=marker_cfg,
+            target_frames=[
+                FrameTransformerCfg.FrameCfg(
+                    prim_path="{ENV_REGEX_NS}/robot/ee_link",
+                    name="end_effector",
+                    # offset=OffsetCfg(
+                    #     pos=[0.0, 0.0, 0.1034],
+                    # ),
+                ),
+            ],
+        )
+
+
+
+    table = AssetBaseCfg(
+        prim_path="{ENV_REGEX_NS}/Table",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=f"/home/adi2440/Desktop/ur5_isaacsim/usd/table.usd",
         ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.6, 0.0, 0.38),  # Positioned so top surface is at z=0.76m
-        ),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.55, 0.0, 0.0), rot=(0.70711, 0.0, 0.0, 0.70711)),
     )
 
     # Red cube - plastic material
@@ -184,8 +194,27 @@ class RlUr5SceneCfg(InteractiveSceneCfg):
     )
     
     # CORRECT STRUCTURE - Change to this
-    camera = TiledCameraCfg(
-        prim_path="{ENV_REGEX_NS}/camera",  # Move prim_path here
+    tiled_camera_left: TiledCameraCfg = TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/camera_left",  # Move prim_path here
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=2.208,
+            focus_distance=28.0,
+            horizontal_aperture=5.76,
+            vertical_aperture=3.24,
+            clipping_range=(0.1, 1000.0)
+        ),
+        width=256,
+        height=144,
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=(1.2, -0.06, 1.2),
+            rot=(0.3536, 0.3536, 0.1464, 0.8536),
+            convention="world"
+        )
+    )
+
+    tiled_camera_right: TiledCameraCfg = TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/camera_right",  # Move prim_path here
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=2.208,
@@ -213,12 +242,29 @@ class RlUr5SceneCfg(InteractiveSceneCfg):
 # MDP settings
 ##
 
+## Commands class is for defining the final object location
+@configclass
+class CommandsCfg:
+    """Command terms for the MDP."""
+
+    object_pose = mdp.UniformPoseCommandCfg(
+        asset_name="robot",
+        body_name="ee_link",  
+        resampling_time_range=(20.0, 20.0),
+        debug_vis=True,
+        ranges=mdp.UniformPoseCommandCfg.Ranges(
+            pos_x=(0.37, 0.87), pos_y=(0.23, 0.56), pos_z=(0.85, 0.78), roll=(0.0, 0.0), pitch=(0.0, 0.0), yaw=(0.0, 0.0)
+        ),
+    )
+
+
+
 @configclass
 class ActionsCfg:
     """Action specifications for the MDP."""
 
     # Joint position control for UR5 robot
-    joint_positions = mdp.JointPositionActionCfg(
+    arm_action = mdp.JointPositionActionCfg(
         asset_name="robot",
         joint_names=[
             "shoulder_pan_joint",
@@ -226,10 +272,17 @@ class ActionsCfg:
             "elbow_joint",
             "wrist_1_joint",
             "wrist_2_joint",
-            "wrist_3_joint",
-            "robotiq_85_left_knuckle_joint",
+            "wrist_3_joint"
         ],
-        scale=1.0,  # Scale for each joint
+        scale=0.5,  # Scale for each joint
+        use_default_offset=True,
+    )
+
+    gripper_action = mdp.BinaryJointPositionActionCfg(            
+        asset_name="robot",
+        joint_names=["robotiq_85_left_knuckle_joint"],
+        open_command_expr={"panda_finger_.*": 0.0},
+        close_command_expr={"panda_finger_.*": 0.5},
     )
 
 @configclass
@@ -241,34 +294,60 @@ class ObservationsCfg:
         """Observations for policy group."""
 
         # Joint state observations
-        joint_positions = ObsTerm(func=mdp.joint_positions)
-        joint_velocities = ObsTerm(func=mdp.joint_velocities)
+        joint_positions = ObsTerm(
+            func=mdp.joint_pos_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", 
+                                                joint_ids=["shoulder_pan_joint",
+                                                            "shoulder_lift_joint",
+                                                            "elbow_joint",
+                                                            "wrist_1_joint",
+                                                            "wrist_2_joint",
+                                                            "wrist_3_joint",
+                                                            "robotiq_85_left_knuckle_joint"]
+                                                )
+                    }
+        )
+        
+        # Joint state observations
+        joint_velocities = ObsTerm(
+            func=mdp.joint_vel_rel,
+            params={"asset_cfg": SceneEntityCfg("robot", 
+                                                joint_ids=["shoulder_pan_joint",
+                                                            "shoulder_lift_joint",
+                                                            "elbow_joint",
+                                                            "wrist_1_joint",
+                                                            "wrist_2_joint",
+                                                            "wrist_3_joint",
+                                                            "robotiq_85_left_knuckle_joint"]
+                                                )
+                    }
+        )
         
         # End-effector pose
         ee_pose = ObsTerm(func=mdp.end_effector_pose)
         
         # Cube positions
-        cube_positions = ObsTerm(func=mdp.cube_positions)
+        # cube_positions = ObsTerm(func=mdp.cube_positions)
         
         # Target position (for placing the cube)
-        target_position = ObsTerm(func=mdp.target_position)
+        target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "object_pose"})
         
         # Task ID (which cube to pick)
         task_id = ObsTerm(func=mdp.task_id)
         
-        # Camera images - updated for clarity
-        camera_images = ObsTerm(
-            func=mdp.camera_images,
-            params={"camera_cfg": SceneEntityCfg(name="camera")},
-        )
-
-        def __post_init__(self) -> None:
-            self.enable_corruption = False
-            self.concatenate_terms = False  # Keep observations separate in a dict
-
     @configclass
     class RGBCameraPolicyCfg(ObsGroup):
         """Observations for policy group with RGB images."""
+                # Camera images - updated for clarity
+        camera_images_left = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("tiled_camera_left"), "data_type": "rgb"},
+        )
+
+        camera_images_right = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("tiled_camera_right"), "data_type": "rgb"},
+        )
 
         def __post_init__(self):
             self.enable_corruption = False
@@ -292,13 +371,13 @@ class EventCfg:
             'pose':[0.0, 0.0, 0.88, -0.2321, -2.0647, 1.9495, 0.8378, 1.5097, 0.0, 0.0],
         },
     )
-    
+
+    # reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
     # Randomize cube positions - updated to avoid slice objects
     reset_cubes = EventTerm(
         func=mdp.reset_cube_positions,
         mode="reset",
         params={
-            "table_cfg": SceneEntityCfg(name="table"),
             # Explicitly define each cube configuration with asset_name and empty joint_ids
             "cube_cfgs": [
                 SceneEntityCfg(name="red_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
@@ -309,12 +388,11 @@ class EventCfg:
         },
     )
     
-    # Randomly select target cube and placement position
+    # Randomly select target cube and set placement position from commands
     set_task = EventTerm(
         func=mdp.set_pick_and_place_task,
         mode="reset",
         params={
-            "table_cfg": SceneEntityCfg(name="table"),
             "cube_cfgs": [
                 SceneEntityCfg(name="red_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
                 SceneEntityCfg(name="green_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
@@ -322,6 +400,8 @@ class EventCfg:
             ],
         },
     )
+
+    #Think about adding noise to joint states for better generalization
 
 @configclass
 class RewardsCfg:
@@ -337,28 +417,41 @@ class RewardsCfg:
     approach_reward = RewTerm(
         func=mdp.approach_reward,
         weight=1.0,
-        params={"distance_threshold": 0.05},
+        params={
+            "distance_threshold": 0.05,
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
     )
     
     # Reward for grasping the cube
     grasp_reward = RewTerm(
         func=mdp.grasp_reward,
         weight=2.0,
-        params={"gripper_threshold": 0.4},
+        params={
+            "gripper_threshold": 0.4,
+            "distance_threshold": 0.05,
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
     )
     
     # Reward for placing the cube at the target
     placement_reward = RewTerm(
         func=mdp.placement_reward,
         weight=5.0,
-        params={"distance_threshold": 0.1},
+        params={
+            "distance_threshold": 0.05,
+            "gripper_threshold": 0.4,
+        },
     )
     
     # Reward for successfully completing the task
     success_reward = RewTerm(
         func=mdp.success_reward,
         weight=10.0,
-        params={"gripper_threshold": 0.1, "distance_threshold": 0.05},
+        params={
+            "gripper_threshold": 0.2,
+            "distance_threshold": 0.05,
+        },
     )
     
     # Penalty for excessive movement
@@ -374,10 +467,26 @@ class TerminationsCfg:
     # Time out
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     
+    #Object Dropping
+
+    red_cube_dropping = DoneTerm(
+        func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("red_cube")}
+    )
+    green_cube_dropping = DoneTerm(
+        func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("green_cube")}
+    )
+    blue_cube_dropping = DoneTerm(
+        func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("blue_cube")}
+    )
+
+
     # Task success (cube at target and gripper open)
     task_success = DoneTerm(
         func=mdp.task_success,
-        params={"gripper_threshold": 0.1, "distance_threshold": 0.05},
+        params={
+            "gripper_threshold": 0.2,
+            "distance_threshold": 0.05,
+        },
     )
 
 ##
@@ -401,7 +510,7 @@ class RlUr5EnvCfg(ManagerBasedRLEnvCfg):
     terminations: TerminationsCfg = TerminationsCfg()
 
     # Unused managers
-    commands = None
+    commands: CommandsCfg = CommandsCfg()  # Add the command configuration
     curriculum = None
 
     # Post initialization
@@ -409,18 +518,20 @@ class RlUr5EnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # General settings
         self.decimation = 2
-        self.episode_length_s = 30  # Longer episodes for pick and place
-        
-        # Viewer settings
-        self.viewer.eye = (2.0, 2.0, 1.5)
-        self.viewer.lookat = (0.5, 0.0, 0.5)
-        
+        self.episode_length_s = 20  # Longer episodes for pick and place
+
+        # make a smaller scene for play
+        self.scene.num_envs = 10
+        self.scene.env_spacing = 2.5
+        # disable randomization for play
+        self.observations.policy.enable_corruption = False
         # Simulation settings
-        self.sim.dt = 1 / 120
+
+        self.sim.dt = 1 / 120   #120Hz
         self.sim.render_interval = self.decimation
-        self.sim.physx.num_position_iterations = 4
-        self.sim.physx.num_velocity_iterations = 1
-        self.sim.physx.contact_offset = 0.005
+        # self.sim.physx.num_position_iterations = 4
+        # self.sim.physx.num_velocity_iterations = 1
+        # self.sim.physx.contact_offset = 0.005
         self.sim.physx.rest_offset = 0.0
         self.sim.physx.bounce_threshold_velocity = 0.2
         self.sim.physx.bounce_threshold_velocity = 0.01
