@@ -15,7 +15,7 @@ models:
     network:
       - name: net
         input: STATES
-        layers: [128, 64]
+        layers: [256, 128, 64]
         activations: elu
     output: ACTIONS
   value:  # see deterministic_model parameters
@@ -24,7 +24,7 @@ models:
     network:
       - name: net
         input: STATES
-        layers: [128, 64]
+        layers: [256,128, 64]
         activations: elu
     output: ONE
 
@@ -41,7 +41,7 @@ memory:
 agent:
   class: PPO
   rollouts: 24
-  learning_epochs: 10
+  learning_epochs: 20
   mini_batches: 4
   discount_factor: 0.99
   lambda: 0.95

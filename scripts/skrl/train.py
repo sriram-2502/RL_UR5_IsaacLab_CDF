@@ -34,7 +34,7 @@ parser.add_argument(
     "--algorithm",
     type=str,
     default="PPO",
-    choices=["PPO", "IPPO", "MAPPO", "AMP"],
+    choices=["PPO", "IPPO", "MAPPO", "AMP","SAC"],
     help="RL algorithm for training."
 )
 

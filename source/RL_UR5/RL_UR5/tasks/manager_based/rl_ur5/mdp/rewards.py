@@ -68,7 +68,7 @@ def position_command_error(
     des_pos_w, _ = math_utils.combine_frame_transforms(asset.data.root_state_w[:, :3], asset.data.root_state_w[:, 3:7], des_pos_b)
     
     # Calculate distance
-    distance = torch.norm(ee_position - des_pos_w, p=1, dim=-1)
+    distance = torch.norm(ee_position - des_pos_w, p=2, dim=-1)
     
     return distance  # Negative because smaller distance is better
 
@@ -302,6 +302,39 @@ def acceleration_penalty(
     penalty = -0.05 * torch.sum(joint_acc * joint_acc, dim=-1)
     
     return penalty
+
+def action_smoothness_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Penalty for large changes between consecutive actions.
+    
+    Args:
+        env: The RL environment instance
+        
+    Returns:
+        torch.Tensor: Squared L2 norm of the difference between current and previous actions
+    """
+    # Get current actions
+    if not hasattr(env, 'current_actions'):
+        # Initialize on first call with zeros
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    if not hasattr(env, 'prev_actions'):
+        # Initialize previous actions storage
+        env.prev_actions = env.current_actions.clone()
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    # Calculate difference between current and previous actions
+    action_diff = env.current_actions - env.prev_actions
+    
+    # Calculate squared L2 norm
+    action_diff_norm = torch.sum(action_diff * action_diff, dim=-1)
+    
+    # Update previous actions for next step
+    env.prev_actions = env.current_actions.clone()
+    
+    return action_diff_norm
+
+
+
 
 def approach_reward(
     env: ManagerBasedRLEnv,
