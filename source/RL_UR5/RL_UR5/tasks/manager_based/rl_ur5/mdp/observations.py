@@ -233,10 +233,31 @@ def reset_robot_pose(
     joint_pos = torch.tensor(pose, device=env.device).repeat(len(env_ids), 1)
     joint_vel = torch.zeros_like(joint_pos)
     
-    # Set into the physics simulation
-    robot.set_joint_position_target(joint_pos, env_ids=env_ids)
-    robot.set_joint_velocity_target(joint_vel, env_ids=env_ids)
-    robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+    # Get the actuatable joint indices
+    actuatable_joint_names = [
+        "shoulder_pan_joint",
+        "shoulder_lift_joint",
+        "elbow_joint",
+        "wrist_1_joint",
+        "wrist_2_joint",
+        "wrist_3_joint",
+        "robotiq_85_left_knuckle_joint"
+    ]
+    
+    # Get the indices of these joints in the robot model
+    joint_indices = []
+    for name in actuatable_joint_names:
+        if name in robot.joint_names:
+            joint_indices.append(robot.joint_names.index(name))
+    
+    # Print debug info
+    print(f"Setting joint positions for the following indices: {joint_indices}")
+    print(f"Joint pose values being set: {pose}")
+    
+    # Set into the physics simulation - only for the actuatable joints
+    robot.set_joint_position_target(joint_pos, joint_ids=joint_indices, env_ids=env_ids)
+    robot.set_joint_velocity_target(joint_vel, joint_ids=joint_indices, env_ids=env_ids)
+    robot.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=joint_indices, env_ids=env_ids)
     
     return {}
 
@@ -385,7 +406,7 @@ def set_pick_and_place_task(
             pose_range = {
                 "x": (0.37, 0.87),
                 "y": (0.23, 0.56),
-                "z": (0.85, 0.77),
+                "z": (0.78, 0.85),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
                 "yaw": (0.0, 0.0),
@@ -407,3 +428,249 @@ def set_pick_and_place_task(
         }
     
     return {}
+
+def initialize_task_stages(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+):
+    """Initialize task stages for curriculum learning.
+    
+    Args:
+        env: The environment instance
+        env_ids: Tensor of environment IDs to initialize
+    """
+    # Initialize task stages dictionary if it doesn't exist
+    if not hasattr(env, "task_stages"):
+        env.task_stages = {}
+    
+    # Set initial stage for each environment
+    for cur_env in env_ids.tolist():
+        env.task_stages[cur_env] = 0  # Stage 0: Alignment above cube
+    
+    return {}
+
+def update_task_stages(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+):
+    """Update task stages based on subtask completion.
+    
+    Args:
+        env: The environment instance
+        env_ids: Tensor of environment IDs to update
+    """
+    # Skip if task stages not initialized
+    if not hasattr(env, "task_stages") or not hasattr(env, "obs_data") or "subtask_terms" not in env.obs_data:
+        return {}
+    
+    # Process each environment
+    for i in env_ids.tolist():
+        if i not in env.task_stages:
+            continue
+            
+        current_stage = env.task_stages[i]
+        
+        # Check for stage transitions based on subtask completion
+        if current_stage == 0:  # Alignment stage
+            if env.obs_data["subtask_terms"]["alignment_complete"][i]:
+                env.task_stages[i] = 1  # Move to grasp stage
+                
+        elif current_stage == 1:  # Grasp stage
+            if env.obs_data["subtask_terms"]["cube_grasped"][i]:
+                env.task_stages[i] = 2  # Move to placement stage
+                
+        elif current_stage == 2:  # Placement stage
+            if env.obs_data["subtask_terms"]["cube_placed"][i]:
+                env.task_stages[i] = 3  # Task complete
+    
+    return {}
+
+"""
+Subtask Cfg Functions
+
+"""
+
+def alignment_above_cube_complete(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg,
+    ee_frame_cfg: SceneEntityCfg,
+    height_threshold: float = 0.8,
+    alignment_threshold: float = 0.9,
+) -> torch.Tensor:
+    """Check if end-effector is aligned above the target cube.
+    
+    Args:
+        env: The RL environment instance
+        robot_cfg: Configuration for the robot
+        ee_frame_cfg: Configuration for the end-effector frame
+        height_threshold: Desired height above the cube
+        alignment_threshold: Threshold for orientation alignment (0-1)
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating alignment success
+    """
+    # Initialize result tensor
+    result = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # Get end-effector position and orientation
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    ee_quat = ee_frame.data.target_quat_w[..., 0, :]
+    
+    for i in range(env.num_envs):
+        # Skip if no task info
+        if not hasattr(env, "task_info") or i not in env.task_info:
+            continue
+            
+        target_info = env.task_info[i]
+        target_cube_name = target_info["target_cube"]
+        cube = env.scene[target_cube_name]
+        cube_position = cube.data.root_pos_w[i, :3]
+        cube_quat = cube.data.root_quat_w[i, :]
+        
+        # Calculate desired hover position
+        target_position = cube_position.clone()
+        target_position[2] += height_threshold
+        
+        # Check position
+        hover_distance = torch.norm(ee_position[i] - target_position, p=2)
+        
+        # Check orientation alignment
+        ee_rot_mat = math_utils.matrix_from_quat(ee_quat[i].unsqueeze(0)).squeeze(0)
+        cube_rot_mat = math_utils.matrix_from_quat(cube_quat.unsqueeze(0)).squeeze(0)
+        
+        # Extract axes
+        ee_x_axis = ee_rot_mat[:, 0]
+        ee_y_axis = ee_rot_mat[:, 1]
+        cube_y_axis = cube_rot_mat[:, 1]
+        cube_z_axis = cube_rot_mat[:, 2]
+        
+        # Calculate alignment
+        x_z_alignment = torch.abs(torch.dot(-ee_x_axis, cube_z_axis))
+        y_y_alignment = torch.abs(torch.dot(-ee_y_axis, cube_y_axis))
+        alignment = torch.sqrt(x_z_alignment * y_y_alignment)
+        
+        # Set result if both position and orientation conditions are met
+        if hover_distance < 0.05 and alignment > alignment_threshold:
+            result[i] = True
+            
+    return result
+
+def cube_grasped(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg,
+    ee_frame_cfg: SceneEntityCfg,
+    distance_threshold: float = 0.05,
+    gripper_threshold: float = 25.0,
+) -> torch.Tensor:
+    """Check if the target cube is grasped.
+    
+    Args:
+        env: The RL environment instance
+        robot_cfg: Configuration for the robot
+        ee_frame_cfg: Configuration for the end-effector frame
+        distance_threshold: Maximum distance to consider "close"
+        gripper_threshold: Minimum gripper position to consider "closed"
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating grasp success
+    """
+    # Initialize result tensor
+    result = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # Get end-effector position
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get robot
+    robot = env.scene[robot_cfg.name]
+    
+    # Find gripper joint index
+    joint_names = robot.joint_names
+    gripper_joint_name = "robotiq_85_left_knuckle_joint"
+    gripper_joint_idx = joint_names.index(gripper_joint_name) if gripper_joint_name in joint_names else -1
+    
+    if gripper_joint_idx == -1:
+        return result
+    
+    # Get gripper position
+    gripper_position = robot.data.joint_pos[:, gripper_joint_idx]
+    
+    for i in range(env.num_envs):
+        # Skip if no task info
+        if not hasattr(env, "task_info") or i not in env.task_info:
+            continue
+            
+        target_info = env.task_info[i]
+        target_cube_name = target_info["target_cube"]
+        cube = env.scene[target_cube_name]
+        cube_position = cube.data.root_pos_w[i, :3]
+        
+        # Calculate distance to cube
+        distance = torch.norm(ee_position[i] - cube_position, p=2)
+        
+        # Check if close to cube and gripper is closed
+        if distance < distance_threshold and gripper_position[i] > gripper_threshold:
+            result[i] = True
+            
+    return result
+
+def cube_placed_at_target(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg,
+    distance_threshold: float = 0.05,
+    gripper_threshold: float = 5.0,
+) -> torch.Tensor:
+    """Check if the cube has been placed at the target location.
+    
+    Args:
+        env: The RL environment instance
+        robot_cfg: Configuration for the robot
+        distance_threshold: Maximum distance to consider "at target"
+        gripper_threshold: Maximum gripper position to consider "open"
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating placement success
+    """
+    # Initialize result tensor
+    result = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # Get robot
+    robot = env.scene[robot_cfg.name]
+    
+    # Find gripper joint index
+    joint_names = robot.joint_names
+    gripper_joint_name = "robotiq_85_left_knuckle_joint"
+    gripper_joint_idx = joint_names.index(gripper_joint_name) if gripper_joint_name in joint_names else -1
+    
+    if gripper_joint_idx == -1:
+        return result
+    
+    # Get gripper position
+    gripper_position = robot.data.joint_pos[:, gripper_joint_idx]
+    
+    for i in range(env.num_envs):
+        # Skip if no task info
+        if not hasattr(env, "task_info") or i not in env.task_info:
+            continue
+            
+        target_info = env.task_info[i]
+        target_cube_name = target_info["target_cube"]
+        target_position = target_info.get("placement_position", None)
+        
+        # Skip if no placement position is defined
+        if target_position is None:
+            continue
+            
+        # Get cube position
+        cube = env.scene[target_cube_name]
+        cube_position = cube.data.root_pos_w[i, :3]
+        
+        # Calculate distance between cube and target
+        distance = torch.norm(cube_position - target_position, p=2)
+        
+        # Check if cube is at target and gripper is open
+        if distance < distance_threshold and gripper_position[i] < gripper_threshold:
+            result[i] = True
+            
+    return result

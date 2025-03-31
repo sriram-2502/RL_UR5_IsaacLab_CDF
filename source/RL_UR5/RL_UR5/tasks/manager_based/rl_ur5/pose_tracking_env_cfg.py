@@ -1,8 +1,11 @@
+from dataclasses import MISSING
+
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets import ArticulationCfg, AssetBaseCfg, RigidObjectCfg
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import EventTermCfg as EventTerm
+from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import ObservationGroupCfg as ObsGroup
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -15,7 +18,9 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR
 from isaaclab.markers.config import FRAME_MARKER_CFG
 from isaaclab.sensors.frame_transformer.frame_transformer_cfg import FrameTransformerCfg, OffsetCfg  
 from isaaclab_assets.robots.ur5 import UR5_GRIPPER_CFG
+from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 from . import mdp
+
 
     
 marker_cfg = FRAME_MARKER_CFG.copy()
@@ -28,7 +33,7 @@ marker_cfg.prim_path = "/Visuals/FrameTransformer"
 ##
 
 @configclass
-class RlUr5SceneCfg(InteractiveSceneCfg):
+class PoseTrackingSceneCfg(InteractiveSceneCfg):
     """Configuration for a UR5 pick and place scene."""
 
     # Ground plane
@@ -58,20 +63,20 @@ class RlUr5SceneCfg(InteractiveSceneCfg):
             ],
         )
     
-    red_cube_frame: FrameTransformerCfg = FrameTransformerCfg(
-            prim_path="{ENV_REGEX_NS}/Robot/base_link",
-            debug_vis=True,
-            visualizer_cfg=marker_cfg,
-            target_frames=[
-                FrameTransformerCfg.FrameCfg(
-                    prim_path="{ENV_REGEX_NS}/red_cube",
-                    name="red_cube_frames",
-                    offset=OffsetCfg(
-                        pos=[0.0, 0.0, 0.0],
-                    ),
-                ),
-            ],
-        )
+    # red_cube_frame: FrameTransformerCfg = FrameTransformerCfg(
+    #         prim_path="{ENV_REGEX_NS}/Robot/base_link",
+    #         debug_vis=True,
+    #         visualizer_cfg=marker_cfg,
+    #         target_frames=[
+    #             FrameTransformerCfg.FrameCfg(
+    #                 prim_path="{ENV_REGEX_NS}/red_cube",
+    #                 name="red_cube_frames",
+    #                 offset=OffsetCfg(
+    #                     pos=[0.0, 0.0, 0.0],
+    #                 ),
+    #             ),
+    #         ],
+    #     )
 
 
     table = AssetBaseCfg(
@@ -79,7 +84,7 @@ class RlUr5SceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"/home/adi2440/Desktop/ur5_isaacsim/usd/table.usd",
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.58, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.68, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
     )
 
     # Red cube - plastic material
@@ -208,13 +213,13 @@ class RlUr5SceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     """Command terms for the MDP."""
 
-    object_pose = mdp.UniformPoseCommandCfg(
+    tracking_pose = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name="ee_link",  
         resampling_time_range=(4.0, 4.0),
-        debug_vis=False,
+        debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.37, 0.87), pos_y=(0.23, 0.56), pos_z=(0.0, 0.2), roll=(0.0, 0.0), pitch=(0.0, 0.0), yaw=(0.0, 0.0)
+            pos_x=(0.37, 0.87), pos_y=(0.23, 0.56), pos_z=(0.0, 0.2), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(-3.14, 3.14)
         ),
     )
 
@@ -257,7 +262,7 @@ class ObservationsCfg:
 
         # Joint state observations - using joint_names instead of joint_ids
         joint_positions = ObsTerm(
-            func=mdp.joint_pos_rel,
+            func=mdp.joint_pos_rel,noise=Unoise(n_min=-0.01, n_max=0.01),
             params={"asset_cfg": SceneEntityCfg("robot", 
                                                 joint_names=["shoulder_pan_joint",
                                                             "shoulder_lift_joint",
@@ -272,7 +277,7 @@ class ObservationsCfg:
         
         # Joint velocity observations - also using joint_names
         joint_velocities = ObsTerm(
-            func=mdp.joint_vel_rel,
+            func=mdp.joint_vel_rel,noise=Unoise(n_min=-0.01, n_max=0.01),
             params={"asset_cfg": SceneEntityCfg("robot", 
                                                 joint_names=["shoulder_pan_joint",
                                                             "shoulder_lift_joint",
@@ -289,53 +294,56 @@ class ObservationsCfg:
         ee_pose = ObsTerm(func=mdp.end_effector_pose)
         
         # Cube positions
-        cube_positions = ObsTerm(func=mdp.cube_positions)
+        # cube_positions = ObsTerm(func=mdp.cube_positions)
         
-        # Target position (for placing the cube)
-        target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "object_pose"})
+        # Target position (for the end-effector)
+        target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "tracking_pose"})
         
         # Task ID (which cube to pick)
-        task_id = ObsTerm(func=mdp.task_id)
+        # task_id = ObsTerm(func=mdp.task_id)
 
-    @configclass
-    class SubtaskCfg(ObsGroup):
-        """Observations for tracking the subtask progress."""
+        # Actions
+        actions = ObsTerm(func=mdp.last_action)
+
+    # @configclass
+    # class SubtaskCfg(ObsGroup):
+    #     """Observations for tracking the subtask progress."""
         
-        # Stage 0: Alignment above cube
-        alignment_complete = ObsTerm(
-            func=mdp.alignment_above_cube_complete,
-            params={
-                "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "ee_frame_cfg": SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "height_threshold": 0.3,
-                "alignment_threshold": 0.0,
-            },
-        )
+    #     # Stage 0: Alignment above cube
+    #     alignment_complete = ObsTerm(
+    #         func=mdp.alignment_above_cube_complete,
+    #         params={
+    #             "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
+    #             "ee_frame_cfg": SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
+    #             "height_threshold": 0.3,
+    #             "alignment_threshold": 0.0,
+    #         },
+    #     )
         
-        # Stage 1: Grasp cube
-        cube_grasped = ObsTerm(
-            func=mdp.cube_grasped,
-            params={
-                "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "ee_frame_cfg": SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "distance_threshold": 0.01,
-                "gripper_threshold": 25.0,
-            },
-        )
+    #     # Stage 1: Grasp cube
+    #     cube_grasped = ObsTerm(
+    #         func=mdp.cube_grasped,
+    #         params={
+    #             "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
+    #             "ee_frame_cfg": SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
+    #             "distance_threshold": 0.01,
+    #             "gripper_threshold": 25.0,
+    #         },
+    #     )
         
-        # Stage 2: Place cube at target
-        cube_placed = ObsTerm(
-            func=mdp.cube_placed_at_target,
-            params={
-                "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "distance_threshold": 0.05,
-                "gripper_threshold": 5.0,
-            },
-        )
+    #     # Stage 2: Place cube at target
+    #     cube_placed = ObsTerm(
+    #         func=mdp.cube_placed_at_target,
+    #         params={
+    #             "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
+    #             "distance_threshold": 0.05,
+    #             "gripper_threshold": 5.0,
+    #         },
+    #     )
         
         def __post_init__(self):
             self.enable_corruption = False
-            self.concatenate_terms = False
+            self.concatenate_terms = True
     
     # @configclass
     # class RGBCameraPolicyCfg(ObsGroup):
@@ -351,14 +359,11 @@ class ObservationsCfg:
     #         params={"sensor_cfg": SceneEntityCfg("tiled_camera_right"), "data_type": "rgb"},
     #     )
 
-    #     def __post_init__(self):
-    #         self.enable_corruption = False
-    #         self.concatenate_terms = False
 
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
-    subtask_terms: SubtaskCfg = SubtaskCfg()
+    # subtask_terms: SubtaskCfg = SubtaskCfg()
     # rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()
 
 
@@ -376,44 +381,44 @@ class EventCfg:
     )
 
     # reset_all = EventTerm(func=mdp.reset_scene_to_default, mode="reset")
-    # Randomize cube positions - updated to avoid slice objects
-    reset_cubes = EventTerm(
-        func=mdp.reset_cube_positions,
-        mode="reset",
-        params={
-            # Explicitly define each cube configuration with asset_name and empty joint_ids
-            "cube_cfgs": [
-                SceneEntityCfg(name="red_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
-                SceneEntityCfg(name="green_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
-                SceneEntityCfg(name="blue_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
-            ],
-            "min_distance": 0.1,  # Minimum distance between cubes
-        },
-    )
+    # # Randomize cube positions - updated to avoid slice objects
+    # reset_cubes = EventTerm(
+    #     func=mdp.reset_cube_positions,
+    #     mode="reset",
+    #     params={
+    #         # Explicitly define each cube configuration with asset_name and empty joint_ids
+    #         "cube_cfgs": [
+    #             SceneEntityCfg(name="red_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
+    #             SceneEntityCfg(name="green_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
+    #             SceneEntityCfg(name="blue_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
+    #         ],
+    #         "min_distance": 0.1,  # Minimum distance between cubes
+    #     },
+    # )
     
-    # Randomly select target cube and set placement position from commands
-    set_task = EventTerm(
-        func=mdp.set_pick_and_place_task,
-        mode="reset",
-        params={
-            "cube_cfgs": [
-                SceneEntityCfg(name="red_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
-                SceneEntityCfg(name="green_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
-                SceneEntityCfg(name="blue_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
-            ],
-        },
-    )
+    # # # Randomly select target cube and set placement position from commands
+    # set_task = EventTerm(
+    #     func=mdp.set_pick_and_place_task,
+    #     mode="reset",
+    #     params={
+    #         "cube_cfgs": [
+    #             SceneEntityCfg(name="red_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
+    #             SceneEntityCfg(name="green_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
+    #             SceneEntityCfg(name="blue_cube", joint_ids=[],fixed_tendon_ids=[], body_ids=[],object_collection_ids=[]),
+    #         ],
+    #     },
+    # )
 
-    init_task_stages = EventTerm(
-        func=mdp.initialize_task_stages,
-        mode="reset",
-    )
+    # init_task_stages = EventTerm(
+    #     func=mdp.initialize_task_stages,
+    #     mode="reset",
+    # )
     
-    # Update task stages during each step
-    update_task_stages = EventTerm(
-        func=mdp.update_task_stages,
-        mode="step",
-    )
+    # # Update task stages during each step
+    # update_task_stages = EventTerm(
+    #     func=mdp.update_task_stages,
+    #     mode="step",
+    # )
 
     #Think about adding noise to joint states for better generalization
 
@@ -421,19 +426,41 @@ class EventCfg:
 class RewardsCfg:
     """Reward terms for the MDP."""
 
-    # Distance-based reward for approaching the cube
-    distance_to_cube = RewTerm(
-        func=mdp.distance_to_target_cube,
-        weight=-1.0,
-        params={"ee_frame_cfg": SceneEntityCfg("ee_frame"),}
+    # Distance-based reward to approach the tracking pose
+    distance_to_tracking_pose = RewTerm(
+        func=mdp.position_command_error,
+        weight=-0.4,
+        params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "tracking_pose"},
     )
-    
-    #Distance-based reward for approaching the cube (tanh mapped)
-    distance_to_cube_tanh = RewTerm(
-        func=mdp.distance_to_target_cube_tanh,
-        weight=0.5,
-        params={"ee_frame_cfg": SceneEntityCfg("ee_frame"),"std":0.1}
+
+    distance_to_tracking_pose_tanh = RewTerm(
+        func=mdp.position_command_error_tanh,
+        weight=0.2,
+        params={"asset_cfg": SceneEntityCfg("robot"), "std": 0.1, "command_name": "tracking_pose"},
     )
+
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)
+    joint_vel = RewTerm(
+        func=mdp.joint_vel_l2,
+        weight=-0.0001,
+        params={"asset_cfg": SceneEntityCfg("robot")},
+    )
+
+
+    # # In the RewardsCfg class in rl_ur5_env_cfg.py
+    orientation_reward = RewTerm(
+        func=mdp.orientation_command_error,
+        weight=-0.3,  # Adjust weight as needed
+        params={
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),"command_name": "tracking_pose",
+        },
+    )
+    # #Distance-based reward for approaching the cube (tanh mapped)
+    # distance_to_cube_tanh = RewTerm(
+    #     func=mdp.distance_to_target_cube_tanh,
+    #     weight=0.5,
+    #     params={"ee_frame_cfg": SceneEntityCfg("ee_frame"),"std":0.1}
+    # )
     
     # # Reward for being close to the cube
     # approach_reward = RewTerm(
@@ -466,15 +493,7 @@ class RewardsCfg:
     #     },
     # )
     
-    # # In the RewardsCfg class in rl_ur5_env_cfg.py
-    # orientation_reward = RewTerm(
-    #     func=mdp.orientation_alignment_reward,
-    #     weight=3.0,  # Adjust weight as needed
-    #     params={
-    #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-    #         "align_weight": 1.0,
-    #     },
-    # )
+
 
     # # Reward for successfully completing the task
     # success_reward = RewTerm(
@@ -501,20 +520,15 @@ class RewardsCfg:
 
 
     # Penalty for excessive movement
-    movement_penalty = RewTerm(
-        func=mdp.movement_penalty,
-        weight=-0.01,
-    )
+    # movement_penalty = RewTerm(
+    #     func=mdp.movement_penalty,
+    #     weight=2.0,
+    # )
 
-    # In the RewardsCfg class in rl_ur5_env_cfg.py
-    acceleration_penalty = RewTerm(
-        func=mdp.acceleration_penalty,
-        weight=0.5,  # Adjust weight as needed
-    )
-
-    # jerk_penalty = RewTerm(
-    #     func=mdp.jerk_penalty,
-    #     weight=0.3,  # Adjust weight as needed
+    # # In the RewardsCfg class in rl_ur5_env_cfg.py
+    # acceleration_penalty = RewTerm(
+    #     func=mdp.acceleration_penalty,
+    #     weight=0.5,  # Adjust weight as needed
     # )
 
 @configclass
@@ -526,36 +540,51 @@ class TerminationsCfg:
     
     #Object Dropping
 
-    red_cube_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("red_cube")}
+    # red_cube_dropping = DoneTerm(
+    #     func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("red_cube")}
+    # )
+    # green_cube_dropping = DoneTerm(
+    #     func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("green_cube")}
+    # )
+    # blue_cube_dropping = DoneTerm(
+    #     func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("blue_cube")}
+    # )
+
+
+    # # Task success (cube at target and gripper open)
+    # task_success = DoneTerm(
+    #     func=mdp.task_success,
+    #     params={
+    #         "gripper_threshold": 5.0,
+    #         "distance_threshold": 0.05,
+    #     },
+    # )
+
+
+@configclass
+class CurriculumCfg:
+    """Curriculum terms for the MDP."""
+
+    action_rate = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.05, "num_steps": 15000}
     )
-    green_cube_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("green_cube")}
-    )
-    blue_cube_dropping = DoneTerm(
-        func=mdp.root_height_below_minimum, params={"minimum_height": 0.7, "asset_cfg": SceneEntityCfg("blue_cube")}
+
+    joint_vel = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -0.01, "num_steps": 15000}
     )
 
 
-    # Task success (cube at target and gripper open)
-    task_success = DoneTerm(
-        func=mdp.task_success,
-        params={
-            "gripper_threshold": 5.0,
-            "distance_threshold": 0.05,
-        },
-    )
 
 ##
 # Environment configuration
 ##
 
 @configclass
-class RlUr5EnvCfg(ManagerBasedRLEnvCfg):
+class PoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
     """Environment configuration for UR5 pick and place task."""
     
     # Scene settings
-    scene: RlUr5SceneCfg = RlUr5SceneCfg(num_envs=8, env_spacing=4.0)
+    scene: PoseTrackingSceneCfg = PoseTrackingSceneCfg(num_envs=8, env_spacing=4.0)
     
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
@@ -565,17 +594,18 @@ class RlUr5EnvCfg(ManagerBasedRLEnvCfg):
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
+    curriculum: CurriculumCfg = CurriculumCfg()
 
     # Unused managers
     commands: CommandsCfg = CommandsCfg()  # Add the command configuration
-    curriculum = None
+
 
     # Post initialization
     def __post_init__(self) -> None:
         """Post initialization."""
         # General settings
         self.decimation = 2
-        self.episode_length_s = 4  # Longer episodes for pick and place
+        self.episode_length_s = 12  # Longer episodes for pick and place
 
         # make a smaller scene for play
         self.scene.num_envs = 8
@@ -589,9 +619,9 @@ class RlUr5EnvCfg(ManagerBasedRLEnvCfg):
         # self.sim.physx.num_position_iterations = 4
         # self.sim.physx.num_velocity_iterations = 1
         # self.sim.physx.contact_offset = 0.005
-        self.sim.physx.rest_offset = 0.0
-        self.sim.physx.bounce_threshold_velocity = 0.2
-        self.sim.physx.bounce_threshold_velocity = 0.01
-        self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
-        self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
-        self.sim.physx.friction_correlation_distance = 0.00625
+        # self.sim.physx.rest_offset = 0.0
+        # self.sim.physx.bounce_threshold_velocity = 0.2
+        # self.sim.physx.bounce_threshold_velocity = 0.01
+        # self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
+        # self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
+        # self.sim.physx.friction_correlation_distance = 0.00625

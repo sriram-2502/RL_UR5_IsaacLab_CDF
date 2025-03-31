@@ -9,17 +9,17 @@ import torch
 import math
 from typing import TYPE_CHECKING
 import isaaclab.utils.math as math_utils
-
+from isaaclab.assets import RigidObject
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
-# tasks/mdp.py
+# tasks/manager_based/rl_ur5/mdp/rewards.py
 
 import numpy as np
 import random
-from observations import *
+from .observations import *
 
 from isaaclab.managers import SceneEntityCfg
 
@@ -41,23 +41,120 @@ from isaaclab.managers import SceneEntityCfg
 """
 Reward functions
 """
-
-def distance_to_target_cube(
+def position_command_error(
     env: ManagerBasedRLEnv,
+    command_name: str,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
 ) -> torch.Tensor:
     """Reward based on distance between end-effector and target cube.
     
     Args:
         env: The RL environment instance
         asset_cfg: Configuration for the robot asset
+        ee_frame_cfg: Configuration for the end-effector frame
         
     Returns:
         torch.Tensor: Negative distance between end-effector and target cube
     """
-    # Get end-effector pose
-    ee_pose = end_effector_pose(env, asset_cfg)
-    ee_position = ee_pose[:, :3]
+    # Get end-effector position using ee_frame
+    asset: RigidObject = env.scene[asset_cfg.name]
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get the desired position from the command
+    command = env.command_manager.get_command(command_name)
+    des_pos_b = command[:, :3]
+    des_pos_w, _ = math_utils.combine_frame_transforms(asset.data.root_state_w[:, :3], asset.data.root_state_w[:, 3:7], des_pos_b)
+    
+    # Calculate distance
+    distance = torch.norm(ee_position - des_pos_w, p=1, dim=-1)
+    
+    return distance  # Negative because smaller distance is better
+
+
+def orientation_command_error(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Reward based on distance between end-effector and target cube.
+    
+    Args:
+        env: The RL environment instance
+        asset_cfg: Configuration for the robot asset
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Negative distance between end-effector and target cube
+    """
+    # Get end-effector position using ee_frame
+    asset: RigidObject = env.scene[asset_cfg.name]
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_quat = ee_frame.data.target_quat_w[..., 0, :]  # Get orientation quaternion
+    
+    # Get the desired position from the command
+    command = env.command_manager.get_command(command_name)
+    des_quat_b = command[:, 3:7]
+    des_quat_w = math_utils.quat_mul(asset.data.root_state_w[:, 3:7], des_quat_b)
+
+   
+    
+    return math_utils.quat_error_magnitude(ee_quat,des_quat_w)  # Quaternion error between orientations
+
+def position_command_error_tanh(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    std: float,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Reward based on distance between end-effector and target cube.
+    
+    Args:
+        env: The RL environment instance
+        asset_cfg: Configuration for the robot asset
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Negative distance between end-effector and target cube
+    """
+    # Get end-effector position using ee_frame
+    asset: RigidObject = env.scene[asset_cfg.name]
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get the desired position from the command
+    command = env.command_manager.get_command(command_name)
+    des_pos_b = command[:, :3]
+    des_pos_w, _ = math_utils.combine_frame_transforms(asset.data.root_state_w[:, :3], asset.data.root_state_w[:, 3:7], des_pos_b)
+    
+    # Calculate distance
+    distance = torch.norm(ee_position - des_pos_w, p=2, dim=-1)
+    
+    return 1-torch.tanh(distance/std)  # Tanh kernel mapped
+
+
+
+def distance_to_target_cube(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Reward based on distance between end-effector and target cube.
+    
+    Args:
+        env: The RL environment instance
+        asset_cfg: Configuration for the robot asset
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Negative distance between end-effector and target cube
+    """
+    # Get end-effector position using ee_frame
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
     
     # Get target cube positions for each environment
     cube_positions_tensor = torch.zeros((env.num_envs, 3), device=env.device)
@@ -71,8 +168,140 @@ def distance_to_target_cube(
     # Calculate distance
     distance = torch.norm(ee_position - cube_positions_tensor, p=2, dim=-1)
     
-    return -distance  # Negative because smaller distance is better
+    return distance  # Negative because smaller distance is better
 
+
+
+
+def distance_to_target_cube_tanh(
+    env: ManagerBasedRLEnv,
+    std:float = 0.1,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Reward based on distance between end-effector and target cube.
+    
+    Args:
+        env: The RL environment instance
+        std: Standard deviation for the tanh function
+        asset_cfg: Configuration for the robot asset
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Tanh-transformed negative distance between end-effector and target cube
+    """
+    # Get end-effector position using ee_frame
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get target cube positions for each environment
+    cube_positions_tensor = torch.zeros((env.num_envs, 3), device=env.device)
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            cube_positions_tensor[i] = cube.data.root_pos_w[i, :3]
+    
+    # Calculate distance
+    distance = torch.norm(ee_position - cube_positions_tensor, p=2, dim=-1)
+    
+    return 1 - torch.tanh(distance/std)  # Tanh-transformed reward (1 when close, 0 when far)
+
+def orientation_alignment_reward(
+    env: ManagerBasedRLEnv,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Reward for aligning the end-effector orientation with the cube for proper grasping.
+    
+    Specific alignment requirements:
+    - Negative x-axis of ee_frame should align with positive z-axis of cube
+    - Negative y-axis of ee_frame should align with positive y-axis of cube
+    
+    Args:
+        env: The RL environment instance
+        ee_frame_cfg: Configuration for the end-effector frame
+        align_weight: Weight for the alignment reward
+        
+    Returns:
+        torch.Tensor: Reward based on orientation alignment
+    """
+    # Get end-effector orientation
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_quat = ee_frame.data.target_quat_w[..., 0, :]  # Get orientation quaternion
+    
+    # Initialize reward tensor
+    rewards = torch.zeros(env.num_envs, device=env.device)
+    
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            cube_quat = cube.data.root_quat_w[i, :]  # Get cube orientation quaternion
+            
+            # Convert quaternions to rotation matrices
+            ee_rot_mat = math_utils.matrix_from_quat(ee_quat[i].unsqueeze(0)).squeeze(0)
+            cube_rot_mat = math_utils.matrix_from_quat(cube_quat.unsqueeze(0)).squeeze(0)
+            
+            # Extract axes from rotation matrices
+            # For ee_frame
+            ee_x_axis = ee_rot_mat[:, 0]  # X-axis is first column
+            ee_y_axis = ee_rot_mat[:, 1]  # Y-axis is second column
+            
+            # For cube
+            cube_x_axis = cube_rot_mat[:, 0]  # Y-axis is second column
+            cube_z_axis = cube_rot_mat[:, 2]  # Z-axis is third column
+            
+            # We want negative ee_x_axis to align with positive cube_z_axis
+            # And negative ee_y_axis to align with positive cube_x_axis
+            x_z_alignment = torch.abs(torch.dot(-ee_x_axis, cube_z_axis))
+            y_y_alignment = torch.abs(torch.dot(-ee_y_axis, cube_x_axis))
+            
+            # Combine alignments (geometric mean works well for this)
+            combined_alignment = torch.sqrt(x_z_alignment * y_y_alignment)
+            
+            # Apply reward
+            rewards[i] = combined_alignment
+    
+    return rewards
+
+
+
+def acceleration_penalty(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Penalty for high joint accelerations to reduce jerk.
+    
+    Args:
+        env: The RL environment instance
+        asset_cfg: Configuration for the robot asset
+        
+    Returns:
+        torch.Tensor: Negative penalty based on estimated joint accelerations
+    """
+    # Access the environment's internal state for velocity tracking
+    if not hasattr(env, "_prev_joint_vel"):
+        # Initialize previous joint velocities on first call
+        robot = env.scene[asset_cfg.name]
+        env._prev_joint_vel = robot.data.joint_vel.clone()
+        return torch.zeros(env.num_envs, device=env.device)
+    
+    # Get current joint velocities
+    robot = env.scene[asset_cfg.name]
+    curr_joint_vel = robot.data.joint_vel
+    
+    # Calculate joint accelerations (change in velocity)
+    joint_acc = curr_joint_vel - env._prev_joint_vel
+    
+    # Store current velocities for next time step
+    env._prev_joint_vel = curr_joint_vel.clone()
+    
+    # Calculate penalty (sum of squared accelerations)
+    penalty = -0.05 * torch.sum(joint_acc * joint_acc, dim=-1)
+    
+    return penalty
 
 def approach_reward(
     env: ManagerBasedRLEnv,
@@ -320,3 +549,146 @@ def movement_penalty(
     return penalty
 
 
+def curriculum_reward(
+    env: ManagerBasedRLEnv,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
+    height_threshold: float = 0.8,
+    distance_threshold: float = 0.05,
+    gripper_threshold: float = 5.0,
+    alignment_weight: float = 1.0,
+) -> torch.Tensor:
+    """Reward function based on the current task stage.
+    
+    Stages:
+    0 - Alignment: Hover above cube at specified height and align gripper
+    1 - Grasp: Move down and grasp the cube
+    2 - Placement: Move to target location and place the cube
+    3 - Complete: Task successfully completed
+    
+    Args:
+        env: The RL environment instance
+        ee_frame_cfg: Configuration for the end-effector frame
+        height_threshold: Height to maintain in stage 0
+        distance_threshold: Distance threshold for success conditions
+        gripper_threshold: Gripper position threshold for grasping/releasing
+        alignment_weight: Weight for orientation alignment reward
+        
+    Returns:
+        torch.Tensor: Stage-appropriate reward
+    """
+    # Initialize rewards
+    rewards = torch.zeros(env.num_envs, device=env.device)
+    
+    # Skip if task stages not initialized
+    if not hasattr(env, "task_stages"):
+        return rewards
+    
+    # Get end-effector position and orientation
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    ee_quat = ee_frame.data.target_quat_w[..., 0, :]
+    
+    # Get robot
+    robot = env.scene["robot"]
+    
+    # Find joint index for gripper
+    joint_names = robot.joint_names
+    gripper_joint_name = "robotiq_85_left_knuckle_joint"
+    gripper_joint_idx = joint_names.index(gripper_joint_name) if gripper_joint_name in joint_names else -1
+    
+    if gripper_joint_idx == -1:
+        return rewards
+    
+    # Get gripper position
+    gripper_position = robot.data.joint_pos[:, gripper_joint_idx]
+    
+    # Process each environment
+    for i in range(env.num_envs):
+        if i not in env.task_stages:
+            continue
+            
+        current_stage = env.task_stages[i]
+        
+        # Skip environments missing task info
+        if not hasattr(env, "task_info") or i not in env.task_info:
+            continue
+            
+        target_info = env.task_info[i]
+        target_cube_name = target_info["target_cube"]
+        placement_position = target_info.get("placement_position", None)
+        
+        # Get cube position
+        cube = env.scene[target_cube_name]
+        cube_position = cube.data.root_pos_w[i, :3]
+        cube_quat = cube.data.root_quat_w[i, :]
+        
+        # Stage 0: Alignment above cube
+        if current_stage == 0:
+            # Calculate desired position (above cube)
+            target_position = cube_position.clone()
+            target_position[2] += height_threshold
+            
+            # Calculate distance from desired hover position
+            hover_distance = torch.norm(ee_position[i] - target_position, p=2)
+            position_reward = torch.exp(-hover_distance * 5.0)
+            
+            # Calculate orientation alignment
+            ee_rot_mat = math_utils.matrix_from_quat(ee_quat[i].unsqueeze(0)).squeeze(0)
+            cube_rot_mat = math_utils.matrix_from_quat(cube_quat.unsqueeze(0)).squeeze(0)
+            
+            # Extract axes
+            ee_x_axis = ee_rot_mat[:, 0]
+            ee_y_axis = ee_rot_mat[:, 1]
+            cube_x_axis = cube_rot_mat[:, 0]
+            cube_z_axis = cube_rot_mat[:, 2]
+            
+            # Calculate alignment (negative x-axis of ee to positive z-axis of cube,
+            # negative y-axis of ee to positive y-axis of cube)
+            x_z_alignment = torch.abs(torch.dot(-ee_x_axis, cube_z_axis))
+            y_y_alignment = torch.abs(torch.dot(-ee_y_axis, cube_x_axis))
+            alignment_reward = torch.sqrt(x_z_alignment * y_y_alignment)
+            
+            # Combine rewards for stage 0
+            rewards[i] = 0.5 * position_reward + alignment_weight * alignment_reward
+            
+        # Stage 1: Grasp
+        elif current_stage == 1:
+            # Calculate horizontal distance to cube
+            horizontal_distance = torch.norm(ee_position[i, :2] - cube_position[:2], p=2)
+            
+            # Reward for moving down while staying centered
+            height_diff = ee_position[i, 2] - cube_position[2]
+            centered_descent_reward = torch.exp(-horizontal_distance * 10.0) * (1.0 - torch.clamp(height_diff / height_threshold, 0.0, 1.0))
+            
+            # Calculate distance to cube
+            distance = torch.norm(ee_position[i] - cube_position, p=2)
+            
+            # Add grasp reward
+            grasp_reward = 0.0
+            if distance < distance_threshold and gripper_position[i] > gripper_threshold:
+                grasp_reward = 2.0
+            
+            # Combine rewards for stage 1
+            rewards[i] = 0.5 * centered_descent_reward + grasp_reward
+            
+        # Stage 2: Placement
+        elif current_stage == 2:
+            if placement_position is not None:
+                # Reward for bringing cube close to target position
+                target_distance = torch.norm(cube_position - placement_position, p=2)
+                transport_reward = torch.exp(-target_distance * 5.0)
+                
+                # Add placement reward
+                placement_reward = 0.0
+                if target_distance < distance_threshold and gripper_position[i] < gripper_threshold:
+                    placement_reward = 5.0
+                
+                # Combine rewards for stage 2
+                rewards[i] = transport_reward + placement_reward
+                
+        # Stage 3: Complete
+        elif current_stage == 3:
+            # Success reward
+            rewards[i] = 10.0
+    
+    return rewards

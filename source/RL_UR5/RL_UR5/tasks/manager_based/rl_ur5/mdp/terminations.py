@@ -1,18 +1,22 @@
+from __future__ import annotations
+
+import torch
+import math
+from typing import TYPE_CHECKING
+import numpy as np
+import random
+from .observations import *
+
+
+
+import isaaclab.utils.math as math_utils
+from isaaclab.managers import SceneEntityCfg
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
-# tasks/mdp.py
-
-import numpy as np
-import random
-from observations import *
-
-from isaaclab.managers import SceneEntityCfg
-
-
-
+# tasks/manager_based/rl_ur5/mdp/terminations.py
 
 def task_success(
     env: ManagerBasedRLEnv,

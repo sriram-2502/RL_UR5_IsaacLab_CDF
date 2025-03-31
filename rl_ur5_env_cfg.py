@@ -211,7 +211,7 @@ class CommandsCfg:
     object_pose = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name="ee_link",  
-        resampling_time_range=(4.0, 4.0),
+        resampling_time_range=(8.0, 8.0),
         debug_vis=False,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.37, 0.87), pos_y=(0.23, 0.56), pos_z=(0.0, 0.2), roll=(0.0, 0.0), pitch=(0.0, 0.0), yaw=(0.0, 0.0)
@@ -233,19 +233,18 @@ class ActionsCfg:
             "elbow_joint",
             "wrist_1_joint",
             "wrist_2_joint",
-            "wrist_3_joint",
-            "robotiq_85_left_knuckle_joint",
+            "wrist_3_joint"
         ],
         scale=0.5,  # Scale for each joint
         use_default_offset=True,
     )
 
-    # gripper_action = mdp.BinaryJointPositionActionCfg(            
-    #     asset_name="robot",
-    #     joint_names=["robotiq_85_left_knuckle_joint"],
-    #     open_command_expr={"robotiq_85_left_knuckle_joint": 0.0},
-    #     close_command_expr={"robotiq_85_left_knuckle_joint": 30.0},
-    # )
+    gripper_action = mdp.BinaryJointPositionActionCfg(            
+        asset_name="robot",
+        joint_names=["robotiq_85_left_knuckle_joint"],
+        open_command_expr={"robotiq_85_left_knuckle_joint": 0.0},
+        close_command_expr={"robotiq_85_left_knuckle_joint": 30.0},
+    )
 
 @configclass
 class ObservationsCfg:
@@ -296,47 +295,7 @@ class ObservationsCfg:
         
         # Task ID (which cube to pick)
         task_id = ObsTerm(func=mdp.task_id)
-
-    @configclass
-    class SubtaskCfg(ObsGroup):
-        """Observations for tracking the subtask progress."""
         
-        # Stage 0: Alignment above cube
-        alignment_complete = ObsTerm(
-            func=mdp.alignment_above_cube_complete,
-            params={
-                "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "ee_frame_cfg": SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "height_threshold": 0.3,
-                "alignment_threshold": 0.0,
-            },
-        )
-        
-        # Stage 1: Grasp cube
-        cube_grasped = ObsTerm(
-            func=mdp.cube_grasped,
-            params={
-                "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "ee_frame_cfg": SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "distance_threshold": 0.01,
-                "gripper_threshold": 25.0,
-            },
-        )
-        
-        # Stage 2: Place cube at target
-        cube_placed = ObsTerm(
-            func=mdp.cube_placed_at_target,
-            params={
-                "robot_cfg": SceneEntityCfg(name="robot", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-                "distance_threshold": 0.05,
-                "gripper_threshold": 5.0,
-            },
-        )
-        
-        def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = False
-    
     # @configclass
     # class RGBCameraPolicyCfg(ObsGroup):
     #     """Observations for policy group with RGB images."""
@@ -358,7 +317,6 @@ class ObservationsCfg:
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
-    subtask_terms: SubtaskCfg = SubtaskCfg()
     # rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()
 
 
@@ -404,17 +362,6 @@ class EventCfg:
         },
     )
 
-    init_task_stages = EventTerm(
-        func=mdp.initialize_task_stages,
-        mode="reset",
-    )
-    
-    # Update task stages during each step
-    update_task_stages = EventTerm(
-        func=mdp.update_task_stages,
-        mode="step",
-    )
-
     #Think about adding noise to joint states for better generalization
 
 @configclass
@@ -428,78 +375,64 @@ class RewardsCfg:
         params={"ee_frame_cfg": SceneEntityCfg("ee_frame"),}
     )
     
-    #Distance-based reward for approaching the cube (tanh mapped)
-    distance_to_cube_tanh = RewTerm(
-        func=mdp.distance_to_target_cube_tanh,
-        weight=0.5,
-        params={"ee_frame_cfg": SceneEntityCfg("ee_frame"),"std":0.1}
+    # #Distance-based reward for approaching the cube (tanh mapped)
+    # distance_to_cube_tanh = RewTerm(
+    #     func=mdp.distance_to_target_cube_tanh,
+    #     weight=0.5,
+    #     params={"ee_frame_cfg": SceneEntityCfg("ee_frame"),"std":0.1}
+    # )
+    
+    # In the RewardsCfg class in rl_ur5_env_cfg.py
+    orientation_reward = RewTerm(
+        func=mdp.orientation_alignment_reward,
+        weight=0.75,  # Adjust weight as needed
+        params={
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "align_weight": 1.0,
+        },
+)
+
+    # Reward for being close to the cube
+    approach_reward = RewTerm(
+        func=mdp.approach_reward,
+        weight=1.0,
+        params={
+            "distance_threshold": 0.05,
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
     )
     
-    # # Reward for being close to the cube
-    # approach_reward = RewTerm(
-    #     func=mdp.approach_reward,
-    #     weight=1.0,
-    #     params={
-    #         "distance_threshold": 0.01,
-    #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-    #     },
-    # )
+    # Reward for grasping the cube
+    grasp_reward = RewTerm(
+        func=mdp.grasp_reward,
+        weight=2.0,
+        params={
+            "gripper_threshold": 25.0,
+            "distance_threshold": 0.05,
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+        },
+    )
     
-    # # Reward for grasping the cube
-    # grasp_reward = RewTerm(
-    #     func=mdp.grasp_reward,
-    #     weight=2.0,
-    #     params={
-    #         "gripper_threshold": 25.0,
-    #         "distance_threshold": 0.01,
-    #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-    #     },
-    # )
+    # Reward for placing the cube at the target
+    placement_reward = RewTerm(
+        func=mdp.placement_reward,
+        weight=5.0,
+        params={
+            "distance_threshold": 0.05,
+            "gripper_threshold": 25.0,
+        },
+    )
     
-    # # Reward for placing the cube at the target
-    # placement_reward = RewTerm(
-    #     func=mdp.placement_reward,
-    #     weight=5.0,
-    #     params={
-    #         "distance_threshold": 0.05,
-    #         "gripper_threshold": 25.0,
-    #     },
-    # )
+    # Reward for successfully completing the task
+    success_reward = RewTerm(
+        func=mdp.success_reward,
+        weight=10.0,
+        params={
+            "gripper_threshold": 5.0,
+            "distance_threshold": 0.05,
+        },
+    )
     
-    # # In the RewardsCfg class in rl_ur5_env_cfg.py
-    # orientation_reward = RewTerm(
-    #     func=mdp.orientation_alignment_reward,
-    #     weight=3.0,  # Adjust weight as needed
-    #     params={
-    #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
-    #         "align_weight": 1.0,
-    #     },
-    # )
-
-    # # Reward for successfully completing the task
-    # success_reward = RewTerm(
-    #     func=mdp.success_reward,
-    #     weight=10.0,
-    #     params={
-    #         "gripper_threshold": 5.0,
-    #         "distance_threshold": 0.05,
-    #     },
-    # )
-    
-
-    # curriculum_reward = RewTerm(
-    #     func=mdp.curriculum_reward,
-    #     weight=3.0,
-    #     params={
-    #         "ee_frame_cfg": SceneEntityCfg(name="ee_frame", joint_ids=[], fixed_tendon_ids=[], body_ids=[], object_collection_ids=[]),
-    #         "height_threshold": 0.5,
-    #         "distance_threshold": 0.01,
-    #         "gripper_threshold": 25.0,
-    #         "alignment_weight": 2.0,
-    #     },
-    # )
-
-
     # Penalty for excessive movement
     movement_penalty = RewTerm(
         func=mdp.movement_penalty,
@@ -512,10 +445,10 @@ class RewardsCfg:
         weight=0.5,  # Adjust weight as needed
     )
 
-    # jerk_penalty = RewTerm(
-    #     func=mdp.jerk_penalty,
-    #     weight=0.3,  # Adjust weight as needed
-    # )
+    jerk_penalty = RewTerm(
+        func=mdp.jerk_penalty,
+        weight=0.3,  # Adjust weight as needed
+    )
 
 @configclass
 class TerminationsCfg:
