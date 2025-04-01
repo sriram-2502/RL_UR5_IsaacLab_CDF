@@ -241,7 +241,7 @@ class ActionsCfg:
             "wrist_3_joint",
             "robotiq_85_left_knuckle_joint",
         ],
-        scale=0.5,  # Scale for each joint
+        scale=0.25,  # Scale for each joint
         use_default_offset=True,
     )
 
@@ -291,7 +291,7 @@ class ObservationsCfg:
         )
         
         # End-effector pose
-        # ee_pose = ObsTerm(func=mdp.end_effector_pose)
+        ee_pose = ObsTerm(func=mdp.end_effector_pose)
         
         # Cube positions
         # cube_positions = ObsTerm(func=mdp.cube_positions)
@@ -342,7 +342,7 @@ class ObservationsCfg:
     #     )
         
         def __post_init__(self):
-            self.enable_corruption = True
+            self.enable_corruption = False
             self.concatenate_terms = True
     
     # @configclass
@@ -429,7 +429,7 @@ class RewardsCfg:
     # Distance-based reward to approach the tracking pose
     distance_to_tracking_pose = RewTerm(
         func=mdp.position_command_error,
-        weight=-2.5,
+        weight=-2.0,
         params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "tracking_pose"},
     )
 
@@ -442,7 +442,7 @@ class RewardsCfg:
     # # In the RewardsCfg class in rl_ur5_env_cfg.py
     orientation_reward = RewTerm(
         func=mdp.orientation_command_error,
-        weight=-1.0,  # Adjust weight as needed
+        weight=-1.3,  # Adjust weight as needed
         params={
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),"command_name": "tracking_pose",
         },
@@ -462,6 +462,16 @@ class RewardsCfg:
         weight=-0.0000005,  # Adjust weight as needed
     )
 
+    # # In RewardsCfg class
+    # success_reward = RewTerm(
+    #     func=mdp.pose_tracking_success,
+    #     weight=10.0,  # Large positive reward for success
+    #     params={
+    #         "position_threshold": 0.05,
+    #         "orientation_threshold": 0.1,
+    #         "command_name": "tracking_pose",
+    #     },
+    # )
 
 
 @configclass
@@ -471,20 +481,28 @@ class TerminationsCfg:
     # Time out
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     
-
+    # Task success (end-effector at target pose)
+    task_success = DoneTerm(
+        func=mdp.pose_tracking_success,
+        params={
+            "position_threshold": 0.03,
+            "orientation_threshold": 0.05,
+            "command_name": "tracking_pose",
+        },
+    )
 
 @configclass
 class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     joint_torque = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.00005, "num_steps": 1000}
+        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.0005, "num_steps": 400}
     )
 
-    position_weight = CurrTerm(
-    func=mdp.modify_reward_weight, 
-    params={"term_name": "distance_to_tracking_pose", "weight": -0.5, "num_steps": 1000}
-    )
+    # position_weight = CurrTerm(
+    # func=mdp.modify_reward_weight, 
+    # params={"term_name": "distance_to_tracking_pose", "weight": -0.5, "num_steps": 400}
+    # )
 ##
 # Environment configuration
 ##
@@ -516,13 +534,12 @@ class PoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # General settings
         self.decimation = 4
-        self.episode_length_s = 12  # Longer episodes for pick and place
+        self.episode_length_s = 18  # Longer episodes for pick and place
 
         # make a smaller scene for play
         self.scene.num_envs = 8
         self.scene.env_spacing = 4.0
         # disable randomization for play
-        self.observations.policy.enable_corruption = False
         # Simulation settings
 
         self.sim.dt = 1 / 120   #120Hz

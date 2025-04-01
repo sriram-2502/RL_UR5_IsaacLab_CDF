@@ -23,7 +23,7 @@ params:
           val: 0
         fixed_sigma: True
     mlp:
-      units: [256, 128, 64]  # Network architecture matching our SAC config
+      units: [256, 256, 128, 64]  # Network architecture matching our SAC config
       activation: elu    # Using ELU activation like in our SAC config
       d2rl: False
       initializer:
@@ -47,9 +47,9 @@ params:
     reward_shaper:
       scale_value: 1.0
     normalize_advantage: True
-    gamma: 0.9657
-    tau: 0.86
-    learning_rate: 0.0153  # Standard learning rate for PPO
+    gamma: 0.99
+    tau: 0.95
+    learning_rate: 0.001  # Standard learning rate for PPO
     lr_schedule: adaptive
     schedule_type: legacy
     kl_threshold: 0.01
@@ -58,7 +58,7 @@ params:
     save_best_after: 200
     save_frequency: 100
     print_stats: True
-    grad_norm: 9.4229
+    grad_norm: 1.0
     entropy_coef: 0.001  # Slightly lower to focus more on exploitation
     truncate_grads: True
     e_clip: 0.2

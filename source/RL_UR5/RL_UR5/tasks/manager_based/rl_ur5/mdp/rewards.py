@@ -333,7 +333,60 @@ def action_smoothness_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
     
     return action_diff_norm
 
-
+def pose_tracking_success(
+    env: ManagerBasedRLEnv,
+    position_threshold: float = 0.05,
+    orientation_threshold: float = 0.1,
+    command_name: str = "tracking_pose",
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Determine if the pose tracking task has been successfully completed.
+    
+    Args:
+        env: The RL environment instance
+        position_threshold: Maximum position error to consider successful
+        orientation_threshold: Maximum orientation error to consider successful
+        command_name: Name of the command containing the target pose
+        asset_cfg: Configuration for the robot asset
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating task success
+    """
+    # Get end-effector position and orientation using ee_frame
+    asset = env.scene[asset_cfg.name]
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    ee_quat = ee_frame.data.target_quat_w[..., 0, :]
+    
+    # Get the desired position and orientation from the command
+    command = env.command_manager.get_command(command_name)
+    des_pos_b = command[:, :3]
+    des_quat_b = command[:, 3:7]
+    
+    # Transform to world frame
+    des_pos_w, _ = math_utils.combine_frame_transforms(
+        asset.data.root_state_w[:, :3], 
+        asset.data.root_state_w[:, 3:7], 
+        des_pos_b
+    )
+    des_quat_w = math_utils.quat_mul(asset.data.root_state_w[:, 3:7], des_quat_b)
+    
+    # Calculate position error
+    position_error = torch.norm(ee_position - des_pos_w, p=2, dim=-1)
+    
+    # Calculate orientation error
+    orientation_error = math_utils.quat_error_magnitude(ee_quat, des_quat_w)
+    
+    # Check if both position and orientation are within thresholds
+    position_success = position_error < position_threshold
+    orientation_success = orientation_error < orientation_threshold
+    
+    # Success is when both position and orientation criteria are met
+    success = torch.logical_and(position_success, orientation_success)
+    
+    return success
 
 
 def approach_reward(
