@@ -68,7 +68,7 @@ def position_command_error(
     des_pos_w, _ = math_utils.combine_frame_transforms(asset.data.root_state_w[:, :3], asset.data.root_state_w[:, 3:7], des_pos_b)
     
     # Calculate distance
-    distance = torch.norm(ee_position - des_pos_w, p=2, dim=-1)
+    distance = torch.norm(ee_position - des_pos_w, p=1, dim=-1)
     
     return distance  # Negative because smaller distance is better
 

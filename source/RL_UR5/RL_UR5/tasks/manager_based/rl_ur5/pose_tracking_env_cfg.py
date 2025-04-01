@@ -219,7 +219,7 @@ class CommandsCfg:
         resampling_time_range=(4.0, 4.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.37, 0.87), pos_y=(-0.56, 0.56), pos_z=(0.0, 0.4), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(-3.14, 3.14)
+            pos_x=(0.3, 0.6), pos_y=(-0.56, 0.56), pos_z=(0.0, 0.3), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(-3.14, 3.14)
         ),
     )
 
@@ -241,7 +241,7 @@ class ActionsCfg:
             "wrist_3_joint",
             "robotiq_85_left_knuckle_joint",
         ],
-        scale=0.25,  # Scale for each joint
+        scale=0.5,  # Scale for each joint
         use_default_offset=True,
     )
 
@@ -291,7 +291,7 @@ class ObservationsCfg:
         )
         
         # End-effector pose
-        ee_pose = ObsTerm(func=mdp.end_effector_pose)
+        # ee_pose = ObsTerm(func=mdp.end_effector_pose)
         
         # Cube positions
         # cube_positions = ObsTerm(func=mdp.cube_positions)
@@ -342,7 +342,7 @@ class ObservationsCfg:
     #     )
         
         def __post_init__(self):
-            self.enable_corruption = False
+            self.enable_corruption = True
             self.concatenate_terms = True
     
     # @configclass
@@ -433,11 +433,11 @@ class RewardsCfg:
         params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "tracking_pose"},
     )
 
-    # distance_to_tracking_pose_tanh = RewTerm(
-    #     func=mdp.position_command_error_tanh,
-    #     weight=0.5,
-    #     params={"asset_cfg": SceneEntityCfg("robot"), "std": 0.1, "command_name": "tracking_pose"},
-    # )
+    distance_to_tracking_pose_tanh = RewTerm(
+        func=mdp.position_command_error_tanh,
+        weight=0.1,
+        params={"asset_cfg": SceneEntityCfg("robot"), "std": 0.2, "command_name": "tracking_pose"},
+    )
 
     # # In the RewardsCfg class in rl_ur5_env_cfg.py
     orientation_reward = RewTerm(
@@ -448,25 +448,19 @@ class RewardsCfg:
         },
     )
 
-    # Secondary rewards: penalties that will be introduced gradually
-    # Initially set to very small values
-    action_rate = RewTerm(
-        func=mdp.action_rate_l2, 
-        weight=-0.0000001  # Start with extremely small weight
-    )
-    
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.00001)
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
-        weight=-0.0000001,  # Start with extremely small weight
+        weight=-0.00001,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
+    
+    # In the RewardsCfg class in rl_ur5_env_cfg.py
     joint_torques_penalty = RewTerm(
         func=mdp.joint_torques_l2,
-        weight=-0.00000001,  # Start with extremely small weight
+        weight=-0.0000005,  # Adjust weight as needed
     )
-
-
 
 
 
@@ -478,47 +472,18 @@ class TerminationsCfg:
     time_out = DoneTerm(func=mdp.time_out, time_out=True)
     
 
+
 @configclass
 class CurriculumCfg:
-    """Curriculum terms for the MDP.
-    
-    Adapted for short training of 40,000 steps:
-    - First 20,000 steps: Focus on distance rewards
-    - Remaining steps: Gradually introduce smoothness penalties
-    """
-    
-    # Phase 1: First introduce joint velocity penalty (at 20,000 steps)
-    joint_vel_phase1 = CurrTerm(
-        func=mdp.modify_reward_weight, 
-        params={"term_name": "joint_vel", "weight": -0.0001, "num_steps": 2000, "start_step": 20000}
+    """Curriculum terms for the MDP."""
+
+    joint_torque = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.00005, "num_steps": 1000}
     )
-    
-    joint_vel_phase2 = CurrTerm(
-        func=mdp.modify_reward_weight, 
-        params={"term_name": "joint_vel", "weight": -0.001, "num_steps": 2000, "start_step": 25000}
-    )
-    
-    # Phase 2: Introduce action rate penalty (at 25,000 steps)
-    action_rate_phase1 = CurrTerm(
-        func=mdp.modify_reward_weight, 
-        params={"term_name": "action_rate", "weight": -0.0001, "num_steps": 2000, "start_step": 27000}
-    )
-    
-    action_rate_phase2 = CurrTerm(
-        func=mdp.modify_reward_weight, 
-        params={"term_name": "action_rate", "weight": -0.001, "num_steps": 2000, "start_step": 32000}
-    )
-    
-    # Phase 3: Finally introduce joint torques penalty (at 34,000 steps)
-    torque_penalty_phase = CurrTerm(
-        func=mdp.modify_reward_weight, 
-        params={"term_name": "joint_torques_penalty", "weight": -0.000001, "num_steps": 2000, "start_step": 34000}
-    )
-    
-    # Optional: Final phase with all penalties active at full strength
-    final_phase = CurrTerm(
-        func=mdp.modify_reward_weight, 
-        params={"term_name": "joint_torques_penalty", "weight": -0.00001, "num_steps": 2000, "start_step": 36000}
+
+    position_weight = CurrTerm(
+    func=mdp.modify_reward_weight, 
+    params={"term_name": "distance_to_tracking_pose", "weight": -0.5, "num_steps": 1000}
     )
 ##
 # Environment configuration
@@ -539,8 +504,8 @@ class PoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
-    curriculum: CurriculumCfg = CurriculumCfg()
-    # curriculum = None
+    # curriculum: CurriculumCfg = CurriculumCfg()
+    curriculum = None
 
     # Unused managers
     commands: CommandsCfg = CommandsCfg()  # Add the command configuration
