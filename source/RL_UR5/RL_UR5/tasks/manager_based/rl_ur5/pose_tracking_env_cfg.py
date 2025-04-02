@@ -216,10 +216,10 @@ class CommandsCfg:
     tracking_pose = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name="ee_link",  
-        resampling_time_range=(4.0, 4.0),
+        resampling_time_range=(8.0, 8.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.6), pos_y=(-0.56, 0.56), pos_z=(0.0, 0.3), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(-3.14, 3.14)
+            pos_x=(0.3, 0.6), pos_y=(-0.2, 0.2), pos_z=(0.0, 0.3), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(-3.14, 3.14)
         ),
     )
 
@@ -241,7 +241,7 @@ class ActionsCfg:
             "wrist_3_joint",
             "robotiq_85_left_knuckle_joint",
         ],
-        scale=0.25,  # Scale for each joint
+        scale=0.5,  # Scale for each joint
         use_default_offset=True,
     )
 
@@ -262,7 +262,7 @@ class ObservationsCfg:
 
         # Joint state observations - using joint_names instead of joint_ids
         joint_positions = ObsTerm(
-            func=mdp.joint_pos_rel,noise=Unoise(n_min=-0.01, n_max=0.01),
+            func=mdp.joint_pos_rel,noise=Unoise(n_min=-0.005, n_max=0.005),
             params={"asset_cfg": SceneEntityCfg("robot",
                                                 joint_names=["shoulder_pan_joint",
                                                             "shoulder_lift_joint",
@@ -277,7 +277,7 @@ class ObservationsCfg:
         
         # Joint velocity observations - also using joint_names
         joint_velocities = ObsTerm(
-            func=mdp.joint_vel_rel,noise=Unoise(n_min=-0.01, n_max=0.01),
+            func=mdp.joint_vel_rel,noise=Unoise(n_min=-0.0005, n_max=0.0005),
             params={"asset_cfg": SceneEntityCfg("robot", 
                                                 joint_names=["shoulder_pan_joint",
                                                             "shoulder_lift_joint",
@@ -342,7 +342,7 @@ class ObservationsCfg:
     #     )
         
         def __post_init__(self):
-            self.enable_corruption = False
+            self.enable_corruption = True
             self.concatenate_terms = True
     
     # @configclass
@@ -371,12 +371,13 @@ class ObservationsCfg:
 class EventCfg:
     """Configuration for events."""
 
-    # Reset robot joints using the working function
+    # Reset robot joints with random noise
     reset_robot = EventTerm(
-        func=mdp.reset_robot_pose,
+        func=mdp.reset_robot_pose_with_noise,
         mode="reset",
         params={
-            'pose': [-0.2321, -2.0647, 1.9495, 0.8378, 1.5097, 0.0, 0.0],
+            'base_pose': [-0.2321, -2.0647, 1.9495, 0.8378, 1.5097, 0.0, 0.0],
+            'noise_range': 0.05,  # Start with modest noise, increase as training progresses
         },
     )
 
@@ -429,7 +430,7 @@ class RewardsCfg:
     # Distance-based reward to approach the tracking pose
     distance_to_tracking_pose = RewTerm(
         func=mdp.position_command_error,
-        weight=-2.0,
+        weight=-1.5,
         params={"asset_cfg": SceneEntityCfg("robot"), "command_name": "tracking_pose"},
     )
 
@@ -451,7 +452,7 @@ class RewardsCfg:
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.00001)
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
-        weight=-0.00001,
+        weight=-0.001,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
@@ -485,8 +486,10 @@ class TerminationsCfg:
     task_success = DoneTerm(
         func=mdp.pose_tracking_success,
         params={
-            "position_threshold": 0.03,
-            "orientation_threshold": 0.05,
+            "position_threshold": 0.05,
+            "orientation_threshold": 0.1,
+            "velocity_threshold": 0.05,
+            "torque_threshold": 1.0,
             "command_name": "tracking_pose",
         },
     )
@@ -496,7 +499,7 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     joint_torque = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.0005, "num_steps": 400}
+        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.001, "num_steps": 400}
     )
 
     # position_weight = CurrTerm(
@@ -534,7 +537,7 @@ class PoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # General settings
         self.decimation = 4
-        self.episode_length_s = 18  # Longer episodes for pick and place
+        self.episode_length_s = 16  # Longer episodes for pick and place
 
         # make a smaller scene for play
         self.scene.num_envs = 8

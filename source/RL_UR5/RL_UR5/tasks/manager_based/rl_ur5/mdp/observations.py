@@ -208,29 +208,38 @@ def camera_images(env: ManagerBasedRLEnv, camera_cfg: SceneEntityCfg = SceneEnti
 Reset functions
 """
 
-def reset_robot_pose(
+def reset_robot_pose_with_noise(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,
-    pose: list[float] = None,
+    base_pose: list[float] = None,
+    noise_range: float = 0.1,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ):
-    """Reset the robot to a specific joint pose.
+    """Reset the robot to a specific joint pose with added random noise.
     
     Args:
         env: The environment instance
         env_ids: Tensor of environment IDs to reset
-        pose: List of joint positions to set for the robot (default home pose if None)
+        base_pose: Base joint positions to set for the robot (default home pose if None)
+        noise_range: Range of uniform random noise to add to each joint position
         asset_cfg: Configuration for the robot
     """
     # Get the robot from the scene
     robot = env.scene[asset_cfg.name]
     
     # Use default pose if none provided
-    if pose is None:
-        pose = [0.0, -1.57, 0.0, -1.57, 0.0, 0.0, 0.0]  # Default home pose
+    if base_pose is None:
+        base_pose = [-0.2321, -2.0647, 1.9495, 0.8378, 1.5097, 0.0, 0.0]  # Default home pose
     
     # Convert pose to tensor
-    joint_pos = torch.tensor(pose, device=env.device).repeat(len(env_ids), 1)
+    joint_pos_base = torch.tensor(base_pose, device=env.device)
+    
+    # Create random noise for each environment
+    num_joints = len(base_pose)
+    noise = torch.rand((len(env_ids), num_joints), device=env.device) * 2 * noise_range - noise_range
+    
+    # Apply noise to the base pose
+    joint_pos = joint_pos_base.unsqueeze(0) + noise
     joint_vel = torch.zeros_like(joint_pos)
     
     # Get the actuatable joint indices
@@ -250,17 +259,12 @@ def reset_robot_pose(
         if name in robot.joint_names:
             joint_indices.append(robot.joint_names.index(name))
     
-    # Print debug info
-    print(f"Setting joint positions for the following indices: {joint_indices}")
-    print(f"Joint pose values being set: {pose}")
-    
     # Set into the physics simulation - only for the actuatable joints
     robot.set_joint_position_target(joint_pos, joint_ids=joint_indices, env_ids=env_ids)
     robot.set_joint_velocity_target(joint_vel, joint_ids=joint_indices, env_ids=env_ids)
     robot.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=joint_indices, env_ids=env_ids)
     
     return {}
-
 
 def sample_object_poses(
     num_objects: int,
