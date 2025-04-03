@@ -778,3 +778,45 @@ def curriculum_reward(
             rewards[i] = 10.0
     
     return rewards
+
+
+
+## Position above cube rewards
+def position_above_cube_reward(
+    env: ManagerBasedRLEnv,
+    height_offset: float = 0.3,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Reward for positioning the end-effector above the target cube.
+    
+    Args:
+        env: The RL environment instance
+        height_offset: Height above the cube to target
+        asset_cfg: Configuration for the robot asset
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Negative distance between end-effector and target position above cube
+    """
+    # Get end-effector position using ee_frame
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get target cube positions for each environment
+    cube_positions_tensor = torch.zeros((env.num_envs, 3), device=env.device)
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            cube_positions_tensor[i] = cube.data.root_pos_w[i, :3]
+    
+    # Calculate target positions (above cube)
+    target_positions = cube_positions_tensor.clone()
+    target_positions[:, 2] += height_offset  # Add height offset to z-coordinate
+    
+    # Calculate distance to target position above cube
+    distance = torch.norm(ee_position - target_positions, p=2, dim=-1)
+    
+    return distance  # Negative because smaller distance is better

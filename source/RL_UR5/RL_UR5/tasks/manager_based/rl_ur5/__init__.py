@@ -31,11 +31,36 @@ gym.register(
 )
 
 gym.register(
+    id="Isaac-UR5-IKPoseTracking-PPO",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ik_pose_tracking_env_cfg:PoseTrackingEnvCfg",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
+    },
+    disable_env_checker=True,
+)
+
+
+gym.register(
+    id="Isaac-UR5-PreGrasping-PPO",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.pre_grasping_env_cfg:PreGraspingEnvCfg",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_ppo_cfg.yaml",
+        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_ppo_cfg.yaml",
+    },
+    disable_env_checker=True,
+)
+
+
+
+gym.register(
     id="Isaac-UR5-PoseTracking-SAC",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     kwargs={
         "env_cfg_entry_point": f"{__name__}.pose_tracking_env_cfg:PoseTrackingEnvCfg",
-        "skrl_cfg_entry_point": f"{agents.__name__}:skrl_sac_cfg.yaml",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_sac_cfg.yaml",
     },
     disable_env_checker=True,
 )

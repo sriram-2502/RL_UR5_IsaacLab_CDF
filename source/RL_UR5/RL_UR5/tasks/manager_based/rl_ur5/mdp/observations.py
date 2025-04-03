@@ -169,6 +169,27 @@ def target_position(env: ManagerBasedRLEnv) -> torch.Tensor:
     
     return target_positions
 
+def target_cube_position(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Get the position of the target cube based on task_id.
+    
+    Args:
+        env: The RL environment instance
+        
+    Returns:
+        torch.Tensor: Position of the target cube for each environment
+    """
+    # Initialize tensor to hold target cube positions for all environments
+    target_positions = torch.zeros((env.num_envs, 3), device=env.device)
+    
+    # Fill in target positions from task_info for each environment
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_cube_name = env.task_info[i]["target_cube"]
+            cube = env.scene[target_cube_name]
+            target_positions[i] = cube.data.root_pos_w[i, :3]
+    
+    return target_positions
+
 
 def task_id(env: ManagerBasedRLEnv) -> torch.Tensor:
     """Get the one-hot encoded task ID (which cube to pick).
@@ -317,8 +338,8 @@ def reset_cube_positions(
         ]
     
     # Define pick bounds for cube placement
-    pick_min_bounds = torch.tensor([0.37, -0.560, 0.77], device=env.device)
-    pick_max_bounds = torch.tensor([0.87, -0.23, 0.77], device=env.device)
+    pick_min_bounds = torch.tensor([0.3, -0.2, 0.77], device=env.device)
+    pick_max_bounds = torch.tensor([0.6, 0.2, 0.77], device=env.device)
     
     # Calculate pose range dictionary for the sample_object_poses function
     pose_range = {
@@ -408,8 +429,8 @@ def set_pick_and_place_task(
         else:
             # Sample a placement position as fallback
             pose_range = {
-                "x": (0.37, 0.87),
-                "y": (0.23, 0.56),
+                "x": (0.3, 0.6),
+                "y": (0.0, 0.2),
                 "z": (0.78, 0.85),
                 "roll": (0.0, 0.0),
                 "pitch": (0.0, 0.0),
