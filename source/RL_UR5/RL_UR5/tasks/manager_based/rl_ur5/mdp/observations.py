@@ -338,8 +338,8 @@ def reset_cube_positions(
         ]
     
     # Define pick bounds for cube placement
-    pick_min_bounds = torch.tensor([0.3, -0.2, 0.77], device=env.device)
-    pick_max_bounds = torch.tensor([0.6, 0.2, 0.77], device=env.device)
+    pick_min_bounds = torch.tensor([0.3, -0.4, 0.77], device=env.device)
+    pick_max_bounds = torch.tensor([0.6, 0.0, 0.77], device=env.device)
     
     # Calculate pose range dictionary for the sample_object_poses function
     pose_range = {

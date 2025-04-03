@@ -144,25 +144,25 @@ class PreGraspingSceneCfg(InteractiveSceneCfg):
         ),
     )
     
-    # # CORRECT STRUCTURE - Change to this
-    # tiled_camera_left: TiledCameraCfg = TiledCameraCfg(
-    #     prim_path="{ENV_REGEX_NS}/camera_left",  # Move prim_path here
-    #     data_types=["rgb"],
-    #     spawn=sim_utils.PinholeCameraCfg(
-    #         focal_length=2.208,
-    #         focus_distance=28.0,
-    #         horizontal_aperture=5.76,
-    #         vertical_aperture=3.24,
-    #         clipping_range=(0.1, 1000.0)
-    #     ),
-    #     width=256,
-    #     height=144,
-    #     offset=TiledCameraCfg.OffsetCfg(
-    #         pos=(1.2, -0.06, 1.2),
-    #         rot=(0.3536, 0.3536, 0.1464, 0.8536),
-    #         convention="world"
-    #     )
-    # )
+    # CORRECT STRUCTURE - Change to this
+    tiled_camera_left: TiledCameraCfg = TiledCameraCfg(
+        prim_path="{ENV_REGEX_NS}/camera_left",  # Move prim_path here
+        data_types=["rgb"],
+        spawn=sim_utils.PinholeCameraCfg(
+            focal_length=2.208,
+            focus_distance=28.0,
+            horizontal_aperture=5.76,
+            vertical_aperture=3.24,
+            clipping_range=(0.1, 1000.0)
+        ),
+        width=128,
+        height=128,
+        offset=TiledCameraCfg.OffsetCfg(
+            pos=(1.1, -0.06, 1.3),
+            rot=(0.67438, 0.21263, 0.21263,0.67438),
+            convention="opengl"
+        )
+    )
 
     # tiled_camera_right: TiledCameraCfg = TiledCameraCfg(
     #     prim_path="{ENV_REGEX_NS}/camera_right",  # Move prim_path here
@@ -174,8 +174,8 @@ class PreGraspingSceneCfg(InteractiveSceneCfg):
     #         vertical_aperture=3.24,
     #         clipping_range=(0.1, 1000.0)
     #     ),
-    #     width=256,
-    #     height=144,
+    #     width=128,
+    #     height=128,
     #     offset=TiledCameraCfg.OffsetCfg(
     #         pos=(1.2, 0.06, 1.2),
     #         rot=(0.3536, 0.3536, 0.1464, 0.8536),
@@ -275,10 +275,10 @@ class ObservationsCfg:
         )
         
         # # End-effector pose
-        # ee_pose = ObsTerm(func=mdp.end_effector_pose)
+        ee_pose = ObsTerm(func=mdp.end_effector_pose)
         
         # Cube positions
-        cube_positions = ObsTerm(func=mdp.cube_positions)
+        # cube_positions = ObsTerm(func=mdp.cube_positions)
         
         # Target position (for the end-effector)
         # target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "tracking_pose"})
@@ -329,26 +329,26 @@ class ObservationsCfg:
             self.enable_corruption = True
             self.concatenate_terms = True
     
-    # @configclass
-    # class RGBCameraPolicyCfg(ObsGroup):
-    #     """Observations for policy group with RGB images."""
-    #             # Camera images - updated for clarity
-    #     camera_images_left = ObsTerm(
-    #         func=mdp.image,
-    #         params={"sensor_cfg": SceneEntityCfg("tiled_camera_left"), "data_type": "rgb"},
-    #     )
+    @configclass
+    class RGBCameraPolicyCfg(ObsGroup):
+        """Observations for policy group with RGB images."""
+                # Camera images - updated for clarity
+        camera_images_left = ObsTerm(
+            func=mdp.image,
+            params={"sensor_cfg": SceneEntityCfg("tiled_camera_left"), "data_type": "rgb"},
+        )
 
-    #     camera_images_right = ObsTerm(
-    #         func=mdp.image,
-    #         params={"sensor_cfg": SceneEntityCfg("tiled_camera_right"), "data_type": "rgb"},
-    #     )
+        # camera_images_right = ObsTerm(
+        #     func=mdp.image,
+        #     params={"sensor_cfg": SceneEntityCfg("tiled_camera_right"), "data_type": "rgb"},
+        # )
 
 
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
     # subtask_terms: SubtaskCfg = SubtaskCfg()
-    # rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()
+    rgb_camera: RGBCameraPolicyCfg = RGBCameraPolicyCfg()
 
 
 @configclass
@@ -415,14 +415,14 @@ class RewardsCfg:
     position_reward = RewTerm(
         func=mdp.position_above_cube_reward,
         weight=-2.0,
-        params={"height_offset": 0.3},
+        params={"height_offset": 0.1},
     )
     
     # Tanh-transformed position reward
     position_reward_tanh = RewTerm(
-        func=mdp.distance_to_target_cube_tanh,
+        func=mdp.position_above_cube_tanh,
         weight=0.5,
-        params={"std": 0.2},
+        params={"height_offset": 0.1,"std": 0.2},
     )
     
     # Orientation alignment reward
@@ -435,7 +435,7 @@ class RewardsCfg:
     )
     
     # Penalize excessive movements
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.00001)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.0001)
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
         weight=-0.001,
@@ -465,7 +465,7 @@ class TerminationsCfg:
             "orientation_threshold": 0.9,
             "velocity_threshold": 0.05,
             "torque_threshold": 1.0,
-            "height_offset": 0.3,
+            "height_offset": 0.1,
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
             "asset_cfg": SceneEntityCfg("robot"),
         },
@@ -506,7 +506,8 @@ class PreGraspingEnvCfg(ManagerBasedRLEnvCfg):
     curriculum = None
 
     # Unused managers
-    commands: CommandsCfg = CommandsCfg()  # Add the command configuration
+    # commands: CommandsCfg = CommandsCfg()  # Add the command configuration
+    commands = None
 
 
     # Post initialization
