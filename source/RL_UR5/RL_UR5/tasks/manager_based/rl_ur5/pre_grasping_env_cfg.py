@@ -338,12 +338,19 @@ class ObservationsCfg:
             params={"sensor_cfg": SceneEntityCfg("tiled_camera_left"), "data_type": "rgb"},
         )
 
+        # depth_images_left = ObsTerm(
+        #     func=mdp.image,
+        #     params={"sensor_cfg": SceneEntityCfg("tiled_camera_left"), "data_type": "depth"},
+        # )
+
         # camera_images_right = ObsTerm(
         #     func=mdp.image,
         #     params={"sensor_cfg": SceneEntityCfg("tiled_camera_right"), "data_type": "rgb"},
         # )
 
-
+                
+        def __post_init__(self):
+            self.concatenate_terms = False
 
     # observation groups
     policy: PolicyCfg = PolicyCfg()
@@ -461,9 +468,9 @@ class TerminationsCfg:
         func=mdp.alignment_success,
         time_out=True,
         params={
-            "position_threshold": 0.05,
+            "position_threshold": 0.1,
             "orientation_threshold": 0.9,
-            "velocity_threshold": 0.05,
+            "velocity_threshold": 0.08,
             "torque_threshold": 1.0,
             "height_offset": 0.1,
             "ee_frame_cfg": SceneEntityCfg("ee_frame"),
