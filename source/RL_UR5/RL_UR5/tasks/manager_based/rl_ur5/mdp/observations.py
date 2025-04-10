@@ -5,7 +5,7 @@ import math
 from typing import TYPE_CHECKING
 import isaaclab.utils.math as math_utils
 import random
-
+from .thresholds import *  # Import all constants from thresholds
 
 
 from isaaclab.assets import Articulation
@@ -338,8 +338,8 @@ def reset_cube_positions(
         ]
     
     # Define pick bounds for cube placement
-    pick_min_bounds = torch.tensor([0.3, -0.4, 0.77], device=env.device)
-    pick_max_bounds = torch.tensor([0.6, 0.0, 0.77], device=env.device)
+    pick_min_bounds = torch.tensor([0.4, -0.4, 0.77], device=env.device)
+    pick_max_bounds = torch.tensor([0.8, 0.0, 0.77], device=env.device)
     
     # Calculate pose range dictionary for the sample_object_poses function
     pose_range = {
@@ -564,15 +564,17 @@ def alignment_above_cube_complete(
         ee_rot_mat = math_utils.matrix_from_quat(ee_quat[i].unsqueeze(0)).squeeze(0)
         cube_rot_mat = math_utils.matrix_from_quat(cube_quat.unsqueeze(0)).squeeze(0)
         
-        # Extract axes
-        ee_x_axis = ee_rot_mat[:, 0]
-        ee_y_axis = ee_rot_mat[:, 1]
-        cube_y_axis = cube_rot_mat[:, 1]
-        cube_z_axis = cube_rot_mat[:, 2]
+        ee_x_axis = ee_rot_mat[:, 0]  # X-axis is first column
+        ee_y_axis = ee_rot_mat[:, 1]  # Y-axis is second column
         
-        # Calculate alignment
+        # For cube
+        cube_x_axis = cube_rot_mat[:, 0]  # Y-axis is second column
+        cube_z_axis = cube_rot_mat[:, 2]  # Z-axis is third column
+        
+        # We want negative ee_x_axis to align with positive cube_z_axis
+        # And negative ee_y_axis to align with positive cube_x_axis
         x_z_alignment = torch.abs(torch.dot(-ee_x_axis, cube_z_axis))
-        y_y_alignment = torch.abs(torch.dot(-ee_y_axis, cube_y_axis))
+        y_y_alignment = torch.abs(torch.dot(-ee_y_axis, cube_x_axis))
         alignment = torch.sqrt(x_z_alignment * y_y_alignment)
         
         # Set result if both position and orientation conditions are met
@@ -699,3 +701,209 @@ def cube_placed_at_target(
             result[i] = True
             
     return result
+
+
+def debug_gripper_state(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """Debug function to print information about gripper state.
+    
+    Args:
+        env: The environment instance
+        env_ids: Tensor of environment IDs
+        asset_cfg: Configuration for the robot
+    """
+    # Get the robot from the scene
+    robot = env.scene[asset_cfg.name]
+    
+    # Find joint index by name
+    joint_names = robot.joint_names
+    gripper_joint_name = "robotiq_85_left_knuckle_joint"
+    if gripper_joint_name in joint_names:
+        gripper_joint_idx = joint_names.index(gripper_joint_name)
+        
+        # Get current gripper positions for all environments
+        gripper_positions = robot.data.joint_pos[:, gripper_joint_idx]
+        
+        # Print debug info
+        print("\n===== GRIPPER DEBUG INFO (RESET) =====")
+        print(f"Gripper joint: '{gripper_joint_name}' (index: {gripper_joint_idx})")
+        # print(f"Joint limits: {robot.joint_limits}")
+        
+        # Print gripper position for each environment
+        for i, env_id in enumerate(env_ids.tolist()):
+            print(f"Env {env_id}: Gripper position = {gripper_positions[env_id].item():.4f}")
+        
+        # Print statistics
+        open_positions = (gripper_positions < 5.0).sum().item()
+        mid_positions = ((gripper_positions >= 5.0) & (gripper_positions < 25.0)).sum().item()
+        closed_positions = (gripper_positions >= 25.0).sum().item()
+        
+        print(f"Statistics across {env.num_envs} environments:")
+        print(f"  - Open (<5.0): {open_positions}")
+        print(f"  - Mid-range (5.0-25.0): {mid_positions}")
+        print(f"  - Closed (>=25.0): {closed_positions}")
+        print(f"  - Min: {gripper_positions.min().item():.2f}, Max: {gripper_positions.max().item():.2f}")
+        print("======================================\n")
+    else:
+        print(f"\n===== GRIPPER DEBUG ERROR =====")
+        print(f"Joint '{gripper_joint_name}' not found!")
+        print(f"Available joints: {joint_names}")
+        print("==============================\n")
+    
+    return {}
+
+
+def test_gripper_functionality(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+):
+    """Test function that applies gripper open/close commands to verify functionality.
+    
+    Args:
+        env: The environment instance
+        env_ids: Tensor of environment IDs
+        asset_cfg: Configuration for the robot
+    """
+    # Only run this test once during reset
+    if not hasattr(env, "_gripper_test_done"):
+        env._gripper_test_done = False
+    
+    if env._gripper_test_done:
+        return {}
+    
+    # Get the robot from the scene
+    robot = env.scene[asset_cfg.name]
+    
+    # Find gripper joint index
+    joint_names = robot.joint_names
+    gripper_joint_name = "robotiq_85_left_knuckle_joint"
+    
+    if gripper_joint_name not in joint_names:
+        print(f"\n===== GRIPPER TEST ERROR =====")
+        print(f"Joint '{gripper_joint_name}' not found!")
+        print(f"Available joints: {joint_names}")
+        print("==============================\n")
+        env._gripper_test_done = True
+        return {}
+    
+    gripper_joint_idx = joint_names.index(gripper_joint_name)
+    
+    # Print initial gripper state
+    initial_positions = robot.data.joint_pos[:, gripper_joint_idx].clone()
+    print("\n===== GRIPPER FUNCTIONALITY TEST =====")
+    print(f"Initial gripper positions:")
+    for i, env_id in enumerate(env_ids.tolist()):
+        print(f"Env {env_id}: Position = {initial_positions[env_id].item():.4f}")
+    
+    # Test open gripper command (0.0)
+    print("\nTesting OPEN command (0.0)...")
+    
+    # Create tensor for open position targets
+    open_targets = torch.zeros(len(env_ids), 1, device=env.device)
+    
+    # Apply open command
+    robot.set_joint_position_target(
+        open_targets, 
+        joint_ids=[gripper_joint_idx], 
+        env_ids=env_ids
+    )
+    
+    # Simulate for a while using physics_step() for proper physics updates
+    # We do a fixed number of physics steps rather than environment steps
+    # to avoid changing the environment state too much
+    for _ in range(50):
+        # Use the environment's physics stepping method
+        # which properly advances the simulation
+        env.scene.write_data_to_sim()
+        env.sim.step()
+        # env.scene.update_buffers()
+    
+    # Get positions after open command
+    open_positions = robot.data.joint_pos[:, gripper_joint_idx].clone()
+    print("Gripper positions after OPEN command:")
+    for i, env_id in enumerate(env_ids.tolist()):
+        print(f"Env {env_id}: Position = {open_positions[env_id].item():.4f}")
+    
+    # Test close gripper command (30.0)
+    print("\nTesting CLOSE command (30.0)...")
+    
+    # Create tensor for close position targets
+    close_targets = torch.ones(len(env_ids), 1, device=env.device) * 30.0
+    
+    # Apply close command
+    robot.set_joint_position_target(
+        close_targets, 
+        joint_ids=[gripper_joint_idx], 
+        env_ids=env_ids
+    )
+    
+    # Simulate for a while
+    for _ in range(50):
+        # Use the environment's physics stepping method
+        env.scene.write_data_to_sim()
+        env.sim.step()
+        # env.scene.update_buffers()
+    
+    # Get positions after close command
+    close_positions = robot.data.joint_pos[:, gripper_joint_idx].clone()
+    print("Gripper positions after CLOSE command:")
+    for i, env_id in enumerate(env_ids.tolist()):
+        print(f"Env {env_id}: Position = {close_positions[env_id].item():.4f}")
+    
+    # Test if the gripper responds correctly
+    open_success = (open_positions < 5.0).all().item()
+    close_success = (close_positions > 25.0).all().item()
+    
+    print("\nTest Results:")
+    print(f"Open command successful: {open_success}")
+    print(f"Close command successful: {close_success}")
+    
+    if open_success and close_success:
+        print("GRIPPER TEST PASSED: Gripper responds correctly to commands!")
+    else:
+        print("GRIPPER TEST FAILED: Gripper does not respond correctly to commands!")
+        if not open_success:
+            print("  - Gripper failed to open fully")
+        if not close_success:
+            print("  - Gripper failed to close fully")
+    
+    print("========================================\n")
+    
+    env._gripper_test_done = True
+    return {}
+
+
+def object_position_in_robot_root_frame(
+    env: ManagerBasedRLEnv,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("red_cube")
+) -> torch.Tensor:
+    """The position of the object in the robot's root frame."""
+    # Get robot for coordinate transformation
+    robot = env.scene[robot_cfg.name]
+    
+    # Initialize output tensor
+    object_pos_b = torch.zeros((env.num_envs, 3), device=env.device)
+    
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            
+            # Get cube position in world frame
+            cube_pos_w = cube.data.root_pos_w[i, :3]
+            
+            # Transform to robot root frame
+            pos_b, _ = math_utils.subtract_frame_transforms(
+                robot.data.root_state_w[i, :3].unsqueeze(0),
+                robot.data.root_state_w[i, 3:7].unsqueeze(0),
+                cube_pos_w.unsqueeze(0)
+            )
+            object_pos_b[i] = pos_b.squeeze(0)
+    
+    return object_pos_b

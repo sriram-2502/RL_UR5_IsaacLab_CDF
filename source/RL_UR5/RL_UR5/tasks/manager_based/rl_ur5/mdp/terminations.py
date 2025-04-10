@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import random
 from .observations import *
-
+from .thresholds import *  # Import all constants from thresholds
 
 
 import isaaclab.utils.math as math_utils
@@ -181,3 +181,110 @@ def alignment_success(
                 success[i] = True
     
     return success
+
+
+def task_success(
+    env: ManagerBasedRLEnv,
+    gripper_threshold: float = 5.0,
+    distance_threshold: float = 0.05,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Determine if the pick and place task has been successfully completed.
+    
+    The task is considered successful when:
+    1. The target cube is at the desired placement position
+    2. The gripper is open (cube has been released)
+    
+    Args:
+        env: The RL environment instance
+        gripper_threshold: Maximum gripper position to consider "open"
+        distance_threshold: Maximum distance to consider "at target"
+        asset_cfg: Configuration for the robot asset
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating task success
+    """
+    # Initialize success tensor
+    success = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # Get robot
+    robot = env.scene[asset_cfg.name]
+    
+    # Find joint index by name
+    joint_names = robot.joint_names
+    gripper_joint_name = "robotiq_85_left_knuckle_joint"
+    gripper_joint_idx = joint_names.index(gripper_joint_name) if gripper_joint_name in joint_names else -1
+    
+    if gripper_joint_idx == -1:
+        return success
+    
+    # Get gripper position
+    gripper_position = robot.data.joint_pos[:, gripper_joint_idx]
+    
+    for i in range(env.num_envs):
+        # Skip if no task info
+        if not hasattr(env, "task_info") or i not in env.task_info:
+            continue
+            
+        target_info = env.task_info[i]
+        target_cube_name = target_info["target_cube"]
+        placement_position = target_info.get("placement_position", None)
+        
+        # Skip if no placement position is defined
+        if placement_position is None:
+            continue
+            
+        # Get cube position
+        cube = env.scene[target_cube_name]
+        cube_position = cube.data.root_pos_w[i, :3]
+        
+        # Calculate distance between cube and target
+        distance = torch.norm(cube_position - placement_position, p=2)
+        
+        # Check if cube is at target and gripper is open
+        is_at_target = distance < distance_threshold
+        is_gripper_open = gripper_position[i] < gripper_threshold
+        
+        if is_at_target and is_gripper_open:
+            success[i] = True
+    
+    return success
+
+# Add to terminations.py
+def robot_instability(
+    env: ManagerBasedRLEnv,
+    velocity_threshold: float = 5.0,
+    torque_threshold: float = 50.0,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> torch.Tensor:
+    """Terminate episodes where the robot exhibits unstable behavior.
+    
+    Args:
+        env: The RL environment instance
+        velocity_threshold: Maximum joint velocity magnitude
+        torque_threshold: Maximum joint torque magnitude
+        asset_cfg: Configuration for the robot asset
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating instability
+    """
+    # Get robot
+    robot = env.scene[asset_cfg.name]
+    
+    # Check joint velocities
+    joint_velocities = torch.norm(robot.data.joint_vel, p=2, dim=-1)
+    velocity_unstable = joint_velocities > velocity_threshold
+    
+    # Check joint torques if available
+    has_torques = hasattr(robot.data, 'joint_effort') and robot.data.joint_effort is not None
+    if has_torques:
+        joint_torques = torch.norm(robot.data.joint_effort, p=2, dim=-1)
+        torque_unstable = joint_torques > torque_threshold
+        
+        # Terminate if either velocity or torque is unstable
+        unstable = torch.logical_or(velocity_unstable, torque_unstable)
+    else:
+        # Just use velocity if torques not available
+        unstable = velocity_unstable
+    
+    return unstable

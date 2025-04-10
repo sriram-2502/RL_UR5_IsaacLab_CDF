@@ -4,7 +4,7 @@ params:
   # environment wrapper clipping
   env:
     clip_observations: 100.0
-    clip_actions: 5.0  
+    clip_actions: 100.0  
   algo:
     name: a2c_continuous
   model:
@@ -33,13 +33,13 @@ params:
   load_checkpoint: False # flag which sets whether to load the checkpoint
   load_path: '' # path to the checkpoint to load
   config:
-    name: pose_tracking_ur5
+    name: pick_place_ur5
     env_name: rlgpu
     device: 'cuda:0'
     device_name: 'cuda:0'
     multi_gpu: False
     ppo: True
-    mixed_precision: False
+    mixed_precision: True
     normalize_input: True
     normalize_value: True
     value_bootstrap: True
@@ -49,21 +49,21 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 0.0153  # Standard learning rate for PPO
+    learning_rate: 0.0005  # Standard learning rate for PPO
     lr_schedule: adaptive
     schedule_type: legacy
     kl_threshold: 0.01
     score_to_win: 10000
-    max_epochs: 1200  # Set for approximately 45000 steps total
+    max_epochs: 2500  # Set for approximately 45000 steps total
     save_best_after: 200
     save_frequency: 100
     print_stats: True
-    grad_norm: 9.2
+    grad_norm: 1.0
     entropy_coef: 0.001  # Slightly lower to focus more on exploitation
     truncate_grads: True
     e_clip: 0.2
-    horizon_length: 24
-    minibatch_size: 1536  # Adjusted based on our environment's size (num envs × 24 horizon)
+    horizon_length: 36
+    minibatch_size:  73728 #Adjusted based on our environment's size (num envs × 24 horizon)
     mini_epochs: 10
     critic_coef: 2
     clip_value: True

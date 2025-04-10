@@ -10,6 +10,8 @@ import math
 from typing import TYPE_CHECKING
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import RigidObject
+from .thresholds import *  # Import all constants from thresholds
+
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -168,7 +170,7 @@ def distance_to_target_cube(
     # Calculate distance
     distance = torch.norm(ee_position - cube_positions_tensor, p=2, dim=-1)
     
-    return distance  # Negative because smaller distance is better
+    return -distance  # Negative because smaller distance is better
 
 
 
@@ -207,6 +209,75 @@ def distance_to_target_cube_tanh(
     distance = torch.norm(ee_position - cube_positions_tensor, p=2, dim=-1)
     
     return 1 - torch.tanh(distance/std)  # Tanh-transformed reward (1 when close, 0 when far)
+
+def alignment_success_reward(
+    env: ManagerBasedRLEnv,
+    position_threshold: float = 0.05,
+    orientation_threshold: float = 0.9,
+    height_offset: float = 0.1,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Reward for successful alignment above the cube (smoother than termination condition).
+    
+    Args:
+        env: The RL environment instance
+        position_threshold: Maximum position error to consider successful
+        orientation_threshold: Minimum orientation alignment to consider successful (0-1)
+        height_offset: Target height above the cube
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Binary reward (1.0 if aligned, 0.0 otherwise)
+    """
+    # Get end-effector position and orientation
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    ee_quat = ee_frame.data.target_quat_w[..., 0, :]
+    
+    # Initialize reward tensor
+    rewards = torch.zeros(env.num_envs, device=env.device)
+    
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            cube_position = cube.data.root_pos_w[i, :3]
+            cube_quat = cube.data.root_quat_w[i, :]
+            
+            # Calculate target position (above cube)
+            target_position = cube_position.clone()
+            target_position[2] += height_offset
+            
+            # Check position
+            position_error = torch.norm(ee_position[i] - target_position, p=2)
+            
+            # Check orientation alignment
+            ee_rot_mat = math_utils.matrix_from_quat(ee_quat[i].unsqueeze(0)).squeeze(0)
+            cube_rot_mat = math_utils.matrix_from_quat(cube_quat.unsqueeze(0)).squeeze(0)
+            
+            # Extract axes
+            ee_x_axis = ee_rot_mat[:, 0]
+            ee_y_axis = ee_rot_mat[:, 1]
+            cube_y_axis = cube_rot_mat[:, 1]
+            cube_z_axis = cube_rot_mat[:, 2]
+            
+            # Calculate alignment
+            x_z_alignment = torch.abs(torch.dot(-ee_x_axis, cube_z_axis))
+            y_y_alignment = torch.abs(torch.dot(-ee_y_axis, cube_y_axis))
+            combined_alignment = torch.sqrt(x_z_alignment * y_y_alignment)
+            
+            # Smoother reward for near-success cases
+            position_factor = torch.exp(-(position_error**2)/(2*(position_threshold**2)))
+            if combined_alignment > orientation_threshold and position_error < position_threshold:
+                rewards[i] = 1.0
+            else:
+                # Partial reward for being close
+                rewards[i] = 0.5 * position_factor * combined_alignment
+    
+    return rewards
+
+
 
 def orientation_alignment_reward(
     env: ManagerBasedRLEnv,
@@ -267,71 +338,6 @@ def orientation_alignment_reward(
     return rewards
 
 
-
-def acceleration_penalty(
-    env: ManagerBasedRLEnv,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-) -> torch.Tensor:
-    """Penalty for high joint accelerations to reduce jerk.
-    
-    Args:
-        env: The RL environment instance
-        asset_cfg: Configuration for the robot asset
-        
-    Returns:
-        torch.Tensor: Negative penalty based on estimated joint accelerations
-    """
-    # Access the environment's internal state for velocity tracking
-    if not hasattr(env, "_prev_joint_vel"):
-        # Initialize previous joint velocities on first call
-        robot = env.scene[asset_cfg.name]
-        env._prev_joint_vel = robot.data.joint_vel.clone()
-        return torch.zeros(env.num_envs, device=env.device)
-    
-    # Get current joint velocities
-    robot = env.scene[asset_cfg.name]
-    curr_joint_vel = robot.data.joint_vel
-    
-    # Calculate joint accelerations (change in velocity)
-    joint_acc = curr_joint_vel - env._prev_joint_vel
-    
-    # Store current velocities for next time step
-    env._prev_joint_vel = curr_joint_vel.clone()
-    
-    # Calculate penalty (sum of squared accelerations)
-    penalty = -0.05 * torch.sum(joint_acc * joint_acc, dim=-1)
-    
-    return penalty
-
-def action_smoothness_l2(env: ManagerBasedRLEnv) -> torch.Tensor:
-    """Penalty for large changes between consecutive actions.
-    
-    Args:
-        env: The RL environment instance
-        
-    Returns:
-        torch.Tensor: Squared L2 norm of the difference between current and previous actions
-    """
-    # Get current actions
-    if not hasattr(env, 'current_actions'):
-        # Initialize on first call with zeros
-        return torch.zeros(env.num_envs, device=env.device)
-    
-    if not hasattr(env, 'prev_actions'):
-        # Initialize previous actions storage
-        env.prev_actions = env.current_actions.clone()
-        return torch.zeros(env.num_envs, device=env.device)
-    
-    # Calculate difference between current and previous actions
-    action_diff = env.current_actions - env.prev_actions
-    
-    # Calculate squared L2 norm
-    action_diff_norm = torch.sum(action_diff * action_diff, dim=-1)
-    
-    # Update previous actions for next step
-    env.prev_actions = env.current_actions.clone()
-    
-    return action_diff_norm
 
 def pose_tracking_success(
     env: ManagerBasedRLEnv,
@@ -862,3 +868,155 @@ def position_above_cube_tanh(
     distance = torch.norm(ee_position - target_positions, p=2, dim=-1)
     
     return 1-torch.tanh(distance/std)  # Negative because smaller distance is better
+
+def cube_height_reward(
+    env: ManagerBasedRLEnv,
+    base_height: float = CUBE_START_HEIGHT,  # Updated to use cube start height
+    max_height: float = CUBE_MAX_HEIGHT,    # Height for maximum reward
+) -> torch.Tensor:
+    """Reward based on the height of the target cube above its starting position.
+    Higher cube means better grasp.
+    
+    Args:
+        env: The RL environment instance
+        base_height: The base height (cube starting height) with no reward
+        max_height: The height at which maximum reward is given
+        
+    Returns:
+        torch.Tensor: Reward based on cube height
+    """
+    # Initialize rewards
+    rewards = torch.zeros(env.num_envs, device=env.device)
+    
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            
+            # Get cube position
+            cube = env.scene[target_cube_name]
+            cube_height = cube.data.root_pos_w[i, 2]  # Z-coordinate
+            
+            # Calculate reward based on height
+            # No reward if at or below base height, max reward at max_height
+            if cube_height > base_height:
+                # Normalized height between 0 and 1
+                norm_height = min(1.0, (cube_height - base_height) / (max_height - base_height))
+                rewards[i] = norm_height
+    
+    return rewards
+
+
+
+# Add to mdp/rewards.py
+
+def object_is_lifted(
+    env: ManagerBasedRLEnv, 
+    minimal_height: float, 
+    object_cfg: SceneEntityCfg = SceneEntityCfg("red_cube")
+) -> torch.Tensor:
+    """Reward the agent for lifting the object above the minimal height."""
+    # Get target object based on task_id for each environment
+    rewards = torch.zeros(env.num_envs, device=env.device)
+    
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            cube_height = cube.data.root_pos_w[i, 2]
+            
+            # Reward if cube is lifted above the minimal height
+            if cube_height > minimal_height + TABLE_HEIGHT:
+                rewards[i] = 1.0
+    
+    return rewards
+
+
+def object_goal_distance(
+    env: ManagerBasedRLEnv,
+    std: float,
+    minimal_height: float,
+    command_name: str,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("red_cube")
+) -> torch.Tensor:
+    """Reward the agent for tracking the goal pose using tanh-kernel."""
+    # Get command for goal position
+    command = env.command_manager.get_command(command_name)
+    rewards = torch.zeros(env.num_envs, device=env.device)
+    
+    # Get robot for coordinate transformation
+    robot = env.scene[robot_cfg.name]
+    
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            
+            # Get cube position
+            cube_pos_w = cube.data.root_pos_w[i, :3]
+            
+            # Transform goal position to world frame
+            des_pos_b = command[i, :3]
+            des_pos_w, _ = math_utils.combine_frame_transforms(
+                robot.data.root_state_w[i, :3].unsqueeze(0), 
+                robot.data.root_state_w[i, 3:7].unsqueeze(0), 
+                des_pos_b.unsqueeze(0)
+            )
+            des_pos_w = des_pos_w.squeeze(0)
+            
+            # Calculate distance
+            distance = torch.norm(des_pos_w - cube_pos_w, p=2)
+            
+            # Reward if cube is lifted and close to goal
+            if cube_pos_w[2] > minimal_height + TABLE_HEIGHT:
+                rewards[i] = 1.0 - torch.tanh(distance / std)
+    
+    return rewards
+
+
+# Add to mdp/terminations.py
+
+def object_reached_goal(
+    env: ManagerBasedRLEnv,
+    command_name: str = "object_pose",
+    threshold: float = 0.02,
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    object_cfg: SceneEntityCfg = SceneEntityCfg("red_cube")
+) -> torch.Tensor:
+    """Termination condition for the object reaching the goal position."""
+    # Get command for goal position
+    command = env.command_manager.get_command(command_name)
+    result = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    # Get robot for coordinate transformation
+    robot = env.scene[robot_cfg.name]
+    
+    for i in range(env.num_envs):
+        if hasattr(env, "task_info") and i in env.task_info:
+            target_info = env.task_info[i]
+            target_cube_name = target_info["target_cube"]
+            cube = env.scene[target_cube_name]
+            
+            # Get cube position
+            cube_pos_w = cube.data.root_pos_w[i, :3]
+            
+            # Transform goal position to world frame
+            des_pos_b = command[i, :3]
+            des_pos_w, _ = math_utils.combine_frame_transforms(
+                robot.data.root_state_w[i, :3].unsqueeze(0), 
+                robot.data.root_state_w[i, 3:7].unsqueeze(0), 
+                des_pos_b.unsqueeze(0)
+            )
+            des_pos_w = des_pos_w.squeeze(0)
+            
+            # Calculate distance
+            distance = torch.norm(des_pos_w - cube_pos_w, p=2)
+            
+            # Check if cube reached goal
+            if distance < threshold:
+                result[i] = True
+    
+    return result
