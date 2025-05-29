@@ -70,25 +70,18 @@ def pose_tracking_success(
     
     # Get joint velocities and torques
     joint_velocities = torch.norm(asset.data.joint_vel, p=2, dim=-1)
-    
-    # Check if joint torques are available
-    has_torques = hasattr(asset.data, 'joint_effort') and asset.data.joint_effort is not None
-    if has_torques:
-        joint_torques = torch.norm(asset.data.joint_effort, p=2, dim=-1)
-    else:
-        # If torques aren't available, just use a tensor of zeros
-        joint_torques = torch.zeros_like(joint_velocities)
+
+
     
     # Check if all conditions are met
     position_success = position_error < position_threshold
     orientation_success = orientation_error < orientation_threshold
     velocity_success = joint_velocities < velocity_threshold
-    torque_success = joint_torques < torque_threshold
+
     
     # Success is when all criteria are met (position, orientation, velocity, and torque)
     success = torch.logical_and(
-        torch.logical_and(position_success, orientation_success),
-        torch.logical_and(velocity_success, torque_success)
+        torch.logical_and(position_success, orientation_success),velocity_success
     )
     
     return success
@@ -288,3 +281,66 @@ def robot_instability(
         unstable = velocity_unstable
     
     return unstable
+
+
+# NEW TERMINATION FUNCTIONS FOR END-EFFECTOR HEIGHT CONSTRAINTS
+
+def ee_frame_height_below_minimum(
+    env: ManagerBasedRLEnv,
+    minimum_height: float = -0.1,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Determine if the end-effector frame has gone below a minimum height threshold.
+    
+    This termination condition helps prevent the robot from hitting the table or 
+    going below safe operating limits.
+    
+    Args:
+        env: The RL environment instance
+        minimum_height: Minimum z-coordinate threshold (relative to world frame)
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating if end-effector is below minimum height
+    """
+    # Get end-effector position from the frame transformer
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]  # Shape: (num_envs, 3)
+    
+    # Get z-coordinate (height) of end-effector
+    ee_height = ee_position[:, 2]
+    
+    # Check if height is below minimum threshold
+    below_minimum = ee_height < minimum_height
+    
+    return below_minimum
+
+
+def ee_frame_table_collision(
+    env: ManagerBasedRLEnv,
+    table_height: float = TABLE_HEIGHT,
+    safety_margin: float = 0.05,
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+) -> torch.Tensor:
+    """Determine if the end-effector frame is too close to or below the table surface.
+    
+    Args:
+        env: The RL environment instance
+        table_height: Height of the table surface
+        safety_margin: Safety margin above table surface
+        ee_frame_cfg: Configuration for the end-effector frame
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating if end-effector is too close to table
+    """
+    # Get end-effector position from the frame transformer
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get z-coordinate (height) of end-effector
+    ee_height = ee_position[:, 2]
+    
+    # Check if height is below table + safety margin
+    too_close_to_table = ee_height < (table_height + safety_margin)
+    
+    return too_close_to_table

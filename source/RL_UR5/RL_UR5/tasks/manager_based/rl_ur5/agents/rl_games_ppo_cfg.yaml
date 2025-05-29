@@ -1,10 +1,9 @@
-
 params:
   seed: 42
   # environment wrapper clipping
   env:
-    clip_observations: 100.0
-    clip_actions: 100.0  
+    clip_observations: 5
+    clip_actions: 5  
   algo:
     name: a2c_continuous
   model:
@@ -23,7 +22,7 @@ params:
           val: 0
         fixed_sigma: True
     mlp:
-      units: [256, 256, 128, 64]  # Network architecture matching our SAC config
+      units: [2566, 256, 128, 64]  # Network architecture matching our SAC config
       activation: elu    # Using ELU activation like in our SAC config
       d2rl: False
       initializer:
@@ -33,7 +32,7 @@ params:
   load_checkpoint: False # flag which sets whether to load the checkpoint
   load_path: '' # path to the checkpoint to load
   config:
-    name: pick_place_ur5
+    name: pose_tracking_ur5
     env_name: rlgpu
     device: 'cuda:0'
     device_name: 'cuda:0'
@@ -49,17 +48,17 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 0.0005  # Standard learning rate for PPO
+    learning_rate: 0.001  # Standard learning rate for PPO
     lr_schedule: adaptive
     schedule_type: legacy
     kl_threshold: 0.01
     score_to_win: 10000
-    max_epochs: 2500  # Set for approximately 45000 steps total
+    max_epochs: 8000  # Set for approximately 45000 steps total
     save_best_after: 200
     save_frequency: 100
     print_stats: True
     grad_norm: 1.0
-    entropy_coef: 0.001  # Slightly lower to focus more on exploitation
+    entropy_coef: 0.0005  # Slightly lower to focus more on exploitation
     truncate_grads: True
     e_clip: 0.2
     horizon_length: 36
@@ -68,5 +67,5 @@ params:
     critic_coef: 2
     clip_value: True
     clip_actions: False  # Already handled by environment
-    bounds_loss_coef: 0.0001
+    bounds_loss_coef: 0.001
     use_diagnostics: True

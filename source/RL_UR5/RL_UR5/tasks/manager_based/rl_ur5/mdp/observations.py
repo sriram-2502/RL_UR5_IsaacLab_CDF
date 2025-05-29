@@ -229,61 +229,61 @@ def camera_images(env: ManagerBasedRLEnv, camera_cfg: SceneEntityCfg = SceneEnti
 Reset functions
 """
 
+@torch.no_grad()
 def reset_robot_pose_with_noise(
     env: ManagerBasedEnv,
     env_ids: torch.Tensor,
-    base_pose: list[float] = None,
-    noise_range: float = 0.1,
+    base_pose: list[float] | torch.Tensor | None = None,
+    noise_range: float = 0.10,
+    train_gripper: bool = False,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ):
-    """Reset the robot to a specific joint pose with added random noise.
-    
-    Args:
-        env: The environment instance
-        env_ids: Tensor of environment IDs to reset
-        base_pose: Base joint positions to set for the robot (default home pose if None)
-        noise_range: Range of uniform random noise to add to each joint position
-        asset_cfg: Configuration for the robot
     """
-    # Get the robot from the scene
+    Vectorised reset: sets the *same* home pose for all `env_ids` and adds
+    uniform ±`noise_range` rad noise **on-device**.
+
+    • Uses only `torch.rand` → deterministic with `torch.manual_seed`.  
+    • `train_gripper=False` → 6-DoF arm only.  If `True`, the gripper joint
+      is appended and driven like the others.
+    """
     robot = env.scene[asset_cfg.name]
-    
-    # Use default pose if none provided
-    if base_pose is None:
-        base_pose = [-0.2321, -2.0647, 1.9495, 0.8378, 1.5097, 0.0, 0.0]  # Default home pose
-    
-    # Convert pose to tensor
-    joint_pos_base = torch.tensor(base_pose, device=env.device)
-    
-    # Create random noise for each environment
-    num_joints = len(base_pose)
-    noise = torch.rand((len(env_ids), num_joints), device=env.device) * 2 * noise_range - noise_range
-    
-    # Apply noise to the base pose
-    joint_pos = joint_pos_base.unsqueeze(0) + noise
-    joint_vel = torch.zeros_like(joint_pos)
-    
-    # Get the actuatable joint indices
-    actuatable_joint_names = [
-        "shoulder_pan_joint",
-        "shoulder_lift_joint",
-        "elbow_joint",
-        "wrist_1_joint",
-        "wrist_2_joint",
-        "wrist_3_joint",
-        "robotiq_85_left_knuckle_joint"
+
+    # ------------- resolve joint list -------------
+    joint_names = [
+        "shoulder_pan_joint", "shoulder_lift_joint", "elbow_joint",
+        "wrist_1_joint",     "wrist_2_joint",        "wrist_3_joint",
     ]
-    
-    # Get the indices of these joints in the robot model
-    joint_indices = []
-    for name in actuatable_joint_names:
-        if name in robot.joint_names:
-            joint_indices.append(robot.joint_names.index(name))
-    
-    # Set into the physics simulation - only for the actuatable joints
-    robot.set_joint_position_target(joint_pos, joint_ids=joint_indices, env_ids=env_ids)
-    robot.set_joint_velocity_target(joint_vel, joint_ids=joint_indices, env_ids=env_ids)
-    robot.write_joint_state_to_sim(joint_pos, joint_vel, joint_ids=joint_indices, env_ids=env_ids)
+    if train_gripper:
+        joint_names.append("robotiq_85_left_knuckle_joint")
+
+    joint_ids = torch.as_tensor(
+        [robot.joint_names.index(n) for n in joint_names],
+        device=env.device,
+        dtype=torch.long,
+    )
+
+    # ------------- base pose & noise --------------
+    if base_pose is None:
+        # same order as joint_names
+        base_pose = [-0.2321, -2.0647, 1.9495, 0.8378, 1.5097, 0.0]
+        if train_gripper:
+            base_pose.append(0.0)
+
+    base_pose = torch.tensor(base_pose, device=env.device)          #  (J,)
+    noise     = (torch.rand((len(env_ids), len(base_pose)),
+                            device=env.device) * 2 - 1) * noise_range
+
+    q_pos = base_pose.unsqueeze(0) + noise                          #  (B,J)
+    q_vel = torch.zeros_like(q_pos)
+
+    # ----- 1) teleport the robot ----------------------------------------
+    robot.write_joint_state_to_sim(
+        q_pos, q_vel, joint_ids=joint_ids, env_ids=env_ids
+    )
+
+    # ----- 2) align controller targets ----------------------------------
+    robot.set_joint_position_target(q_pos, joint_ids, env_ids)
+    robot.set_joint_velocity_target(q_vel, joint_ids, env_ids)
     
     return {}
 

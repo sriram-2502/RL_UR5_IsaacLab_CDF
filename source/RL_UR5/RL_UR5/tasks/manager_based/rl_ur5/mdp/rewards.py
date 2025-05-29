@@ -70,7 +70,7 @@ def position_command_error(
     des_pos_w, _ = math_utils.combine_frame_transforms(asset.data.root_state_w[:, :3], asset.data.root_state_w[:, 3:7], des_pos_b)
     
     # Calculate distance
-    distance = torch.norm(ee_position - des_pos_w, p=1, dim=-1)
+    distance = torch.norm(ee_position - des_pos_w, dim=-1)
     
     return distance  # Negative because smaller distance is better
 
@@ -339,7 +339,7 @@ def orientation_alignment_reward(
 
 
 
-def pose_tracking_success(
+def pose_tracking_success_reward(
     env: ManagerBasedRLEnv,
     position_threshold: float = 0.05,
     orientation_threshold: float = 0.1,
@@ -399,7 +399,7 @@ def approach_reward(
     env: ManagerBasedRLEnv,
     distance_threshold: float = 0.05,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_link"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
 ) -> torch.Tensor:
     """Reward for being close to the target cube.
     
@@ -441,7 +441,7 @@ def grasp_reward(
     gripper_threshold: float = 0.4,
     distance_threshold: float = 0.05,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_link"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
 ) -> torch.Tensor:
     """Reward for grasping the cube.
     
