@@ -64,13 +64,13 @@ class PoseTrackingSceneCfg(InteractiveSceneCfg):
         )
 
 
-    table = AssetBaseCfg(
-        prim_path="{ENV_REGEX_NS}/Table",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path=f"/home/adi2440/Desktop/ur5_isaacsim/usd/table.usd",
-        ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.6, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 0.0)),
-    )
+    # table = AssetBaseCfg(
+    #     prim_path="{ENV_REGEX_NS}/Table",
+    #     spawn=sim_utils.UsdFileCfg(
+    #         usd_path=f"/home/adi2440/Desktop/ur5_isaacsim/usd/table.usd",
+    #     ),
+    #     init_state=AssetBaseCfg.InitialStateCfg(pos=(0.7, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 0.0)),
+    # )
 
     
     # # CORRECT STRUCTURE - Change to this
@@ -133,7 +133,7 @@ class CommandsCfg:
         resampling_time_range=(8.0, 8.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.4, 0.8), pos_y=(-0.2, 0.2), pos_z=(-0.1, 0.2), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(0.0, 0.0)
+            pos_x=(0.3, 0.7), pos_y=(0.4, 0.5), pos_z=(-0.1, 0.2), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(0.0, 0.0)
         ),
     )
 
@@ -241,7 +241,7 @@ class EventCfg:
         func=mdp.reset_robot_pose_with_noise,
         mode="reset",
         params={
-            'base_pose': [-0.18984586, -1.2770158, 2.12554073, -2.71455557, -1.57770378, -1.55960399],
+            'base_pose': [-0.71055204, -0.56046993,  1.28663111, -2.56980163, -1.59000665,  1.76992667],
             'noise_range': 0.01,  # Start with modest noise, increase as training progresses
         },
     )
@@ -347,13 +347,17 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     joint_torque = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.0001, "num_steps": 2500}
+        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.0001, "num_steps": 600}
     )
 
-    position_weight = CurrTerm(
-    func=mdp.modify_reward_weight, 
-    params={"term_name": "distance_to_tracking_pose_tanh", "weight": 0.05, "num_steps": 2500}
+    action_rate = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.001, "num_steps": 600}
     )
+
+    joint_vel = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -0.001, "num_steps": 600}
+    )
+
 
 ##
 # Environment configuration
@@ -374,8 +378,8 @@ class PoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
-    # curriculum: CurriculumCfg = CurriculumCfg()
-    curriculum = None
+    curriculum: CurriculumCfg = CurriculumCfg()
+    # curriculum = None
 
     # Unused managers
     commands: CommandsCfg = CommandsCfg()  # Add the command configuration

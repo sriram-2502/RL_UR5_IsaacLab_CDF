@@ -53,7 +53,7 @@ params:
     schedule_type: legacy
     kl_threshold: 0.01
     score_to_win: 10000
-    max_epochs: 8000  # Set for approximately 45000 steps total
+    max_epochs: 3000  # Set for approximately 45000 steps total
     save_best_after: 200
     save_frequency: 100
     print_stats: True
