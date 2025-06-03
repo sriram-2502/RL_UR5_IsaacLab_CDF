@@ -69,80 +69,9 @@ class PoseTrackingSceneCfg(InteractiveSceneCfg):
         spawn=sim_utils.UsdFileCfg(
             usd_path=f"/home/adi2440/Desktop/ur5_isaacsim/usd/table.usd",
         ),
-        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.68, 0.0, 0.0), rot=(1.0, 0.0, 0.0, 0.0)),
+        init_state=AssetBaseCfg.InitialStateCfg(pos=(0.7, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 0.0)),
     )
 
-    # Red cube - plastic material
-    red_cube = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/red_cube",
-        spawn=sim_utils.CuboidCfg(
-            size=( 0.0286, 0.0635, 0.0382),  # Dimensions in meters
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                rigid_body_enabled=True,
-                max_linear_velocity=1000.0,
-                max_angular_velocity=1000.0,
-                max_depenetration_velocity=100.0,
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.01),  # 10 grams
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(1.0, 0.0, 0.0),  # Red
-                metallic=0.0,  # Non-metallic for plastic
-                roughness=0.5  # Medium roughness for plastic
-            ),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.5, -0.4, 0.77),  # Will be randomized during reset
-        ),
-    )
-
-    # Green cube - plastic material
-    green_cube = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/green_cube",
-        spawn=sim_utils.CuboidCfg(
-            size=( 0.0286, 0.0635, 0.0382),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                rigid_body_enabled=True,
-                max_linear_velocity=1000.0,
-                max_angular_velocity=1000.0,
-                max_depenetration_velocity=100.0,
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.01),  # 10 grams
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.0, 1.0, 0.0),  # Green
-                metallic=0.0,  # Non-metallic for plastic
-                roughness=0.5  # Medium roughness for plastic
-            ),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.6, -0.4, 0.77),  # Will be randomized during reset
-        ),
-    )
-
-    # Blue cube - plastic material
-    blue_cube = RigidObjectCfg(
-        prim_path="{ENV_REGEX_NS}/blue_cube",
-        spawn=sim_utils.CuboidCfg(
-            size=( 0.0286, 0.0635, 0.0382),
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                rigid_body_enabled=True,
-                max_linear_velocity=1000.0,
-                max_angular_velocity=1000.0,
-                max_depenetration_velocity=100.0,
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=0.01),  # 10 grams
-            collision_props=sim_utils.CollisionPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=(0.0, 0.0, 1.0),  # Blue
-                metallic=0.0,  # Non-metallic for plastic
-                roughness=0.5  # Medium roughness for plastic
-            ),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.7, -0.4, 0.77),  # Will be randomized during reset
-        ),
-    )
     
     # # CORRECT STRUCTURE - Change to this
     # tiled_camera_left: TiledCameraCfg = TiledCameraCfg(
@@ -201,7 +130,7 @@ class CommandsCfg:
     tracking_pose = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name="ee_link",  
-        resampling_time_range=(8.0, 8.0),
+        resampling_time_range=(4.0, 4.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.3, 0.6), pos_y=(-0.2, 0.2), pos_z=(0.0, 0.3), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(-3.14, 3.14)
@@ -246,7 +175,7 @@ class ObservationsCfg:
 
         # Joint state observations - using joint_names instead of joint_ids
         joint_positions = ObsTerm(
-            func=mdp.joint_pos_rel,noise=Unoise(n_min=-0.005, n_max=0.005),
+            func=mdp.joint_pos,noise=Unoise(n_min=-0.01, n_max=0.01),
             params={"asset_cfg": SceneEntityCfg("robot",
                                                 joint_names=["shoulder_pan_joint",
                                                             "shoulder_lift_joint",
@@ -261,7 +190,7 @@ class ObservationsCfg:
         
         # Joint velocity observations - also using joint_names
         joint_velocities = ObsTerm(
-            func=mdp.joint_vel_rel,noise=Unoise(n_min=-0.0005, n_max=0.0005),
+            func=mdp.joint_vel,noise=Unoise(n_min=-0.001, n_max=0.001),
             params={"asset_cfg": SceneEntityCfg("robot", 
                                                 joint_names=["shoulder_pan_joint",
                                                             "shoulder_lift_joint",
@@ -360,8 +289,8 @@ class EventCfg:
         func=mdp.reset_robot_pose_with_noise,
         mode="reset",
         params={
-            'base_pose': [-0.2321, -2.0647, 1.9495, 0.8378, 1.5097, 0.0, 0.0],
-            'noise_range': 0.05,  # Start with modest noise, increase as training progresses
+            'base_pose': [-0.71055204, -1.3046993,  1.9, -2.23, -1.59000665,  1.76992667],
+            'noise_range': 0.01,  # Start with modest noise, increase as training progresses
         },
     )
 
@@ -433,10 +362,10 @@ class RewardsCfg:
         },
     )
 
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.00001)
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.000000001)
     joint_vel = RewTerm(
         func=mdp.joint_vel_l2,
-        weight=-0.001,
+        weight=-0.0000001,
         params={"asset_cfg": SceneEntityCfg("robot")},
     )
 
@@ -444,7 +373,8 @@ class RewardsCfg:
     # In the RewardsCfg class in rl_ur5_env_cfg.py
     joint_torques_penalty = RewTerm(
         func=mdp.joint_torques_l2,
-        weight=-0.0000005,  # Adjust weight as needed
+        params={"asset_cfg": SceneEntityCfg("robot")},
+        weight=-0.000000001,  # Adjust weight as needed
     )
 
     # # In RewardsCfg class
@@ -483,13 +413,18 @@ class CurriculumCfg:
     """Curriculum terms for the MDP."""
 
     joint_torque = CurrTerm(
-        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.004, "num_steps": 400}
+        func=mdp.modify_reward_weight, params={"term_name": "joint_torques_penalty", "weight": -0.0001, "num_steps": 1000}
     )
 
-    # position_weight = CurrTerm(
-    # func=mdp.modify_reward_weight, 
-    # params={"term_name": "distance_to_tracking_pose", "weight": -0.5, "num_steps": 400}
-    # )
+    action_rate = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "action_rate", "weight": -0.0001, "num_steps": 1000}
+    )
+
+    joint_vel = CurrTerm(
+        func=mdp.modify_reward_weight, params={"term_name": "joint_vel", "weight": -0.0001, "num_steps": 1000}
+    )
+
+
 ##
 # Environment configuration
 ##
@@ -521,7 +456,7 @@ class PoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # General settings
         self.decimation = 4
-        self.episode_length_s = 16  # Longer episodes for pick and place
+        self.episode_length_s = 4  # Longer episodes for pick and place
 
         # make a smaller scene for play
         self.scene.num_envs = 8
