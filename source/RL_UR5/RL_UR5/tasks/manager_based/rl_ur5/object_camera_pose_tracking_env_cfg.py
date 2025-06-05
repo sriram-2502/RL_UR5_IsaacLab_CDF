@@ -33,7 +33,7 @@ marker_cfg.prim_path = "/Visuals/FrameTransformer"
 ##
 
 @configclass
-class CameraPoseTrackingSceneCfg(InteractiveSceneCfg):
+class ObjCameraPoseTrackingSceneCfg(InteractiveSceneCfg):
     """Configuration for a UR5 pick and place scene."""
 
     # Ground plane
@@ -72,7 +72,29 @@ class CameraPoseTrackingSceneCfg(InteractiveSceneCfg):
         init_state=AssetBaseCfg.InitialStateCfg(pos=(0.7, 0.0, 0.0), rot=(0.0, 0.0, 0.0, 0.0)),
     )
 
-
+    # Red cube - plastic material
+    red_cube = RigidObjectCfg(
+        prim_path="{ENV_REGEX_NS}/red_cube",
+        spawn=sim_utils.CuboidCfg(
+            size=( 0.0572, 0.0635, 0.191),  # Dimensions in meters
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                rigid_body_enabled=True,
+                max_linear_velocity=1000.0,
+                max_angular_velocity=1000.0,
+                max_depenetration_velocity=100.0,
+            ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.01),  # 10 grams
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(1.0, 0.0, 0.0),  # Red
+                metallic=0.0,  # Non-metallic for plastic
+                roughness=0.5  # Medium roughness for plastic
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(0.5, 0.0, 0.77),  # Will be randomized during reset
+        ),
+    )
     
     # # CORRECT STRUCTURE - Change to this
     # tiled_camera_left: TiledCameraCfg = TiledCameraCfg(
@@ -131,7 +153,7 @@ class CommandsCfg:
     tracking_pose = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name="ee_link",  
-        resampling_time_range=(4.0, 4.0),
+        resampling_time_range=(8.0, 8.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
             pos_x=(0.3, 0.7), pos_y=(0.4, 0.5), pos_z=(-0.1, 0.2), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(0.0, 0.0)
@@ -242,11 +264,61 @@ class EventCfg:
         func=mdp.reset_robot_pose_with_noise,
         mode="reset",
         params={
-            'base_pose': [-0.71055204, -1.3046993,  1.9, -2.23, -1.59000665,  1.76992667],
+            'base_pose': [-0.568, -0.658,  1.602, -2.585, -1.6060665,  -1.64142667],
             'noise_range': 0.01,  # Start with modest noise, increase as training progresses
         },
     )
 
+    # Reset dynamic obstacle position at episode start
+    reset_obstacle = EventTerm(
+        func=mdp.reset_dynamic_obstacle,
+        mode="reset",
+        params={
+            "obstacle_cfg": SceneEntityCfg("red_cube"),
+            "reset_bounds": {
+                "x_min": 0.4, 
+                "x_max": 0.7, 
+                "y_min": 0.0, 
+                "y_max": 0.3, 
+                "z": 0.77
+            },
+        },
+    )
+    
+    # NEW: Reset robot when stuck at table
+    unstuck_robot = EventTerm(
+        func=mdp.reset_robot_when_stuck_at_table,
+        mode="interval",
+        interval_range_s=(0.05, 0.05),  # Check every 0.1 seconds
+        params={
+            "table_height": 0.77,
+            "safety_margin": 0.05,
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "asset_cfg": SceneEntityCfg("robot"),
+            "noise_range": 0.02,
+        },
+    )
+
+    # Move dynamic obstacle during episode
+    move_obstacle = EventTerm(
+        func=mdp.move_dynamic_obstacle,
+        mode="interval",
+        interval_range_s=(0.02, 0.02),  # Update every 0.02 seconds (50Hz)
+        params={
+            "obstacle_cfg": SceneEntityCfg("red_cube"),
+            "movement_type": "random_smooth",
+            "center_pos": [0.5, 0.0, 0.77],
+            "radius": 0.5,
+            "speed": 0.75,
+            "height_variation": 0.0,
+            "diagonal_bounds": {
+                "x_min": 0.3, 
+                "x_max": 0.6, 
+                "y_min": -0.35, 
+                "y_max": 0.35
+            },
+        },
+    )
 
 
 @configclass
@@ -275,10 +347,10 @@ class RewardsCfg:
         },
     )
 
-    # action_rate = RewTerm(func=mdp.action_rate_l2, weight=0.0)
+    # action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.001)
     # joint_vel = RewTerm(
     #     func=mdp.joint_vel_l2,
-    #     weight=0.0,
+    #     weight=-0.001,
     #     params={"asset_cfg": SceneEntityCfg("robot")},
     # )
 
@@ -287,25 +359,13 @@ class RewardsCfg:
     # joint_torques_penalty = RewTerm(
     #     func=mdp.joint_torques_l2,
     #     params={"asset_cfg": SceneEntityCfg("robot")},
-    #     weight=0.0,  # Adjust weight as needed
-    # )
-
-    # # In RewardsCfg class
-    # success_reward = RewTerm(
-    #     func=mdp.pose_tracking_success,
-    #     weight=10.0,  # Large positive reward for success
-    #     params={
-    #         "position_threshold": 0.05,
-    #         "orientation_threshold": 0.1,
-    #         "velocity_threshold": 1.0,
-    #         "command_name": "tracking_pose",
-    #     },
+    #     weight=-0.00001,  # Adjust weight as needed
     # )
 
         # NEW: End-effector table collision prevention
     ee_frame_table_collision = RewTerm(
         func=mdp.ee_frame_table_collision,
-        weight=-1.0, 
+        weight=-50.0, 
         params={
             "table_height": 0.77,  # 0.77 from your thresholds.py
             "safety_margin": 0.05,  # 5cm safety margin above table
@@ -313,6 +373,29 @@ class RewardsCfg:
         },
     )
 
+    # NEW: Obstacle avoidance penalties
+    obstacle_avoidance = RewTerm(
+        func=mdp.obstacle_avoidance_penalty,
+        weight=1.0,  # Weight of 1.0 because penalty is already negative
+        params={
+            "obstacle_cfg": SceneEntityCfg("red_cube"),
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "safe_distance": 0.12,
+            "danger_distance": 0.08,
+            "max_penalty": -5.0,
+        },
+    )
+    
+    obstacle_avoidance_smooth = RewTerm(
+        func=mdp.obstacle_avoidance_penalty_tanh,
+        weight=2.0,
+        params={
+            "obstacle_cfg": SceneEntityCfg("red_cube"),
+            "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+            "safe_distance": 0.12,
+            "std": 0.1,
+        },
+    )
 
 @configclass
 class TerminationsCfg:
@@ -333,16 +416,22 @@ class TerminationsCfg:
         },
     )
 
+    # nan_observations = DoneTerm(
+    #     func=mdp.nan_observation_termination,
+    #     # No parameters needed
+    # )
     
-    # # NEW: End-effector table collision prevention
-    # ee_frame_table_collision = DoneTerm(
-    #     func=mdp.ee_frame_table_collision,
+
+    # robot_instability = DoneTerm(
+    #     func=mdp.robot_instability,
     #     params={
-    #         "table_height": 0.77,  # 0.77 from your thresholds.py
-    #         "safety_margin": 0.05,  # 5cm safety margin above table
-    #         "ee_frame_cfg": SceneEntityCfg("ee_frame"),
+    #         "velocity_threshold": 30.0,  # Adjust based on your robot
+    #         "torque_threshold": 30.0,   # Adjust based on your robot
+    #         "asset_cfg": SceneEntityCfg("robot"),
     #     },
     # )
+
+
 
 @configclass
 class CurriculumCfg:
@@ -366,11 +455,11 @@ class CurriculumCfg:
 ##
 
 @configclass
-class CameraPoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
+class ObjCameraPoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
     """Environment configuration for UR5 pick and place task."""
     
     # Scene settings
-    scene: CameraPoseTrackingSceneCfg = CameraPoseTrackingSceneCfg(num_envs=8, env_spacing=4.0)
+    scene: ObjCameraPoseTrackingSceneCfg = ObjCameraPoseTrackingSceneCfg(num_envs=8, env_spacing=4.0)
     
     # Basic settings
     observations: ObservationsCfg = ObservationsCfg()
@@ -392,7 +481,7 @@ class CameraPoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
         """Post initialization."""
         # General settings
         self.decimation = 4
-        self.episode_length_s = 4.0  # Longer episodes for pick and place
+        self.episode_length_s = 8.0  # Longer episodes for pick and place
 
         # make a smaller scene for play
         self.scene.num_envs = 8
@@ -401,4 +490,10 @@ class CameraPoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
 
         self.sim.dt = 1 / 120   #120Hz
         self.sim.render_interval = self.decimation
-        self.sim.disable_contact_processing = True
+
+        self.sim.physx.bounce_threshold_velocity = 0.2
+        self.sim.physx.bounce_threshold_velocity = 0.01
+        self.sim.physx.gpu_found_lost_aggregate_pairs_capacity = 1024 * 1024 * 4
+        self.sim.physx.gpu_total_aggregate_pairs_capacity = 16 * 1024
+        self.sim.physx.friction_correlation_distance = 0.00625
+        self.sim.disable_contact_processing = False  # Enable contact processing

@@ -42,6 +42,16 @@ gym.register(
     disable_env_checker=True,
 )
 
+gym.register(
+    id="Isaac-UR5-ObjCameraPoseTracking-PPO",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.object_camera_pose_tracking_env_cfg:ObjCameraPoseTrackingEnvCfg",
+        "rl_games_cfg_entry_point": f"{agents.__name__}:rl_games_camera_ppo_cfg.yaml",
+    },
+    disable_env_checker=True,
+)
+
 
 gym.register(
     id="Isaac-UR5-IKPoseTracking-PPO",

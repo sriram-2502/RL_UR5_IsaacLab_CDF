@@ -1020,3 +1020,88 @@ def object_reached_goal(
                 result[i] = True
     
     return result
+
+
+def obstacle_avoidance_penalty(
+    env: ManagerBasedRLEnv,
+    obstacle_cfg: SceneEntityCfg = SceneEntityCfg("red_cube"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    safe_distance: float = 0.2,
+    danger_distance: float = 0.1,
+    max_penalty: float = -5.0,
+) -> torch.Tensor:
+    """Penalty for getting too close to the dynamic obstacle.
+    
+    Args:
+        env: The RL environment instance
+        obstacle_cfg: Configuration for the obstacle object
+        ee_frame_cfg: Configuration for the end-effector frame
+        safe_distance: Distance at which penalty starts
+        danger_distance: Distance at which maximum penalty is applied
+        max_penalty: Maximum penalty value (should be negative)
+        
+    Returns:
+        torch.Tensor: Penalty based on proximity to obstacle
+    """
+    # Get end-effector position
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get obstacle position
+    obstacle = env.scene[obstacle_cfg.name]
+    obstacle_position = obstacle.data.root_pos_w[:, :3]
+    
+    # Calculate distance between end-effector and obstacle
+    distance = torch.norm(ee_position - obstacle_position, p=2, dim=-1)
+    
+    # Calculate penalty using exponential decay
+    penalty = torch.zeros_like(distance)
+    
+    # Apply penalty only when within safe distance
+    within_safe_distance = distance < safe_distance
+    
+    # Exponential penalty that increases as distance decreases
+    normalized_distance = torch.clamp((distance - danger_distance) / (safe_distance - danger_distance), 0.0, 1.0)
+    penalty_magnitude = max_penalty * (1.0 - normalized_distance) ** 2
+    
+    penalty = torch.where(within_safe_distance, penalty_magnitude, penalty)
+    
+    return penalty
+
+def obstacle_avoidance_penalty_tanh(
+    env: ManagerBasedRLEnv,
+    obstacle_cfg: SceneEntityCfg = SceneEntityCfg("red_cube"),
+    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
+    safe_distance: float = 0.2,
+    std: float = 0.1,
+) -> torch.Tensor:
+    """Smooth tanh-based penalty for obstacle proximity.
+    
+    Args:
+        env: The RL environment instance
+        obstacle_cfg: Configuration for the obstacle object
+        ee_frame_cfg: Configuration for the end-effector frame
+        safe_distance: Reference distance for penalty calculation
+        std: Standard deviation for tanh function
+        
+    Returns:
+        torch.Tensor: Smooth penalty based on proximity to obstacle
+    """
+    # Get end-effector position
+    ee_frame = env.scene[ee_frame_cfg.name]
+    ee_position = ee_frame.data.target_pos_w[..., 0, :]
+    
+    # Get obstacle position
+    obstacle = env.scene[obstacle_cfg.name]
+    obstacle_position = obstacle.data.root_pos_w[:, :3]
+    
+    # Calculate distance between end-effector and obstacle
+    distance = torch.norm(ee_position - obstacle_position, p=2, dim=-1)
+    
+    # Tanh-based penalty (negative reward that increases as distance decreases)
+    penalty = -torch.tanh((safe_distance - distance) / std)
+    
+    # Only apply penalty when distance is less than safe_distance
+    penalty = torch.where(distance < safe_distance, penalty, torch.zeros_like(penalty))
+    
+    return penalty

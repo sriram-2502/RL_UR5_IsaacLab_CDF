@@ -243,77 +243,48 @@ def task_success(
     
     return success
 
-# Add to terminations.py
+
+
+
 def robot_instability(
     env: ManagerBasedRLEnv,
-    velocity_threshold: float = 5.0,
+    velocity_threshold: float = 50.0,
     torque_threshold: float = 50.0,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Terminate episodes where the robot exhibits unstable behavior.
+    """Termination condition for detecting robot instability.
     
     Args:
         env: The RL environment instance
-        velocity_threshold: Maximum joint velocity magnitude
-        torque_threshold: Maximum joint torque magnitude
+        velocity_threshold: Maximum allowable joint velocity magnitude
+        torque_threshold: Maximum allowable joint torque magnitude
         asset_cfg: Configuration for the robot asset
         
     Returns:
-        torch.Tensor: Boolean tensor indicating instability
+        torch.Tensor: Boolean tensor indicating unstable environments
     """
-    # Get robot
+    # Get robot asset
     robot = env.scene[asset_cfg.name]
     
+    # Initialize result tensor
+    is_unstable = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
     # Check joint velocities
-    joint_velocities = torch.norm(robot.data.joint_vel, p=2, dim=-1)
-    velocity_unstable = joint_velocities > velocity_threshold
+    if hasattr(robot.data, 'joint_vel') and robot.data.joint_vel is not None:
+        max_joint_vel = torch.max(torch.abs(robot.data.joint_vel), dim=-1)[0]
+        high_velocity = max_joint_vel > velocity_threshold
+        is_unstable = torch.logical_or(is_unstable, high_velocity)
     
-    # Check joint torques if available
-    has_torques = hasattr(robot.data, 'joint_effort') and robot.data.joint_effort is not None
-    if has_torques:
-        joint_torques = torch.norm(robot.data.joint_effort, p=2, dim=-1)
-        torque_unstable = joint_torques > torque_threshold
-        
-        # Terminate if either velocity or torque is unstable
-        unstable = torch.logical_or(velocity_unstable, torque_unstable)
-    else:
-        # Just use velocity if torques not available
-        unstable = velocity_unstable
+    # Check joint torques/efforts if available
+    if hasattr(robot.data, 'joint_effort') and robot.data.joint_effort is not None:
+        max_joint_torque = torch.max(torch.abs(robot.data.joint_effort), dim=-1)[0]
+        high_torque = max_joint_torque > torque_threshold
+        is_unstable = torch.logical_or(is_unstable, high_torque)
     
-    return unstable
+    return is_unstable
 
 
-# NEW TERMINATION FUNCTIONS FOR END-EFFECTOR HEIGHT CONSTRAINTS
 
-def ee_frame_height_below_minimum(
-    env: ManagerBasedRLEnv,
-    minimum_height: float = -0.1,
-    ee_frame_cfg: SceneEntityCfg = SceneEntityCfg("ee_frame"),
-) -> torch.Tensor:
-    """Determine if the end-effector frame has gone below a minimum height threshold.
-    
-    This termination condition helps prevent the robot from hitting the table or 
-    going below safe operating limits.
-    
-    Args:
-        env: The RL environment instance
-        minimum_height: Minimum z-coordinate threshold (relative to world frame)
-        ee_frame_cfg: Configuration for the end-effector frame
-        
-    Returns:
-        torch.Tensor: Boolean tensor indicating if end-effector is below minimum height
-    """
-    # Get end-effector position from the frame transformer
-    ee_frame = env.scene[ee_frame_cfg.name]
-    ee_position = ee_frame.data.target_pos_w[..., 0, :]  # Shape: (num_envs, 3)
-    
-    # Get z-coordinate (height) of end-effector
-    ee_height = ee_position[:, 2]
-    
-    # Check if height is below minimum threshold
-    below_minimum = ee_height < minimum_height
-    
-    return below_minimum
 
 
 def ee_frame_table_collision(
@@ -344,3 +315,102 @@ def ee_frame_table_collision(
     too_close_to_table = ee_height < (table_height + safety_margin)
     
     return too_close_to_table
+
+
+def nan_observation_termination(
+    env: ManagerBasedRLEnv,
+) -> torch.Tensor:
+    """Termination condition for NaN values in observations.
+    
+    Args:
+        env: The RL environment instance
+        
+    Returns:
+        torch.Tensor: Boolean tensor indicating environments with NaN observations
+    """
+    # Initialize result tensor
+    has_nan = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    try:
+        # Method 1: Check if we have cached observation data
+        if hasattr(env, '_obs_buf') and env._obs_buf is not None:
+            for group_name, obs_data in env._obs_buf.items():
+                if torch.is_tensor(obs_data):
+                    group_has_nan = torch.isnan(obs_data).any(dim=-1)
+                    has_nan = torch.logical_or(has_nan, group_has_nan)
+                elif isinstance(obs_data, dict):
+                    for key, value in obs_data.items():
+                        if torch.is_tensor(value):
+                            if value.ndim > 1:
+                                term_has_nan = torch.isnan(value).any(dim=tuple(range(1, value.ndim)))
+                            else:
+                                term_has_nan = torch.isnan(value)
+                            has_nan = torch.logical_or(has_nan, term_has_nan)
+        
+        # Method 2: Check observation manager directly
+        elif hasattr(env, 'observation_manager') and env.observation_manager is not None:
+            obs_manager = env.observation_manager
+            
+            # Try to get available groups
+            if hasattr(obs_manager, '_group_obs_terms'):
+                for group_name, terms in obs_manager._group_obs_terms.items():
+                    try:
+                        # Compute observations for this group
+                        group_obs = obs_manager.compute_group(group_name)
+                        if torch.is_tensor(group_obs):
+                            group_has_nan = torch.isnan(group_obs).any(dim=-1)
+                            has_nan = torch.logical_or(has_nan, group_has_nan)
+                    except Exception as e:
+                        print(f"Error computing observations for group {group_name}: {e}")
+                        continue
+            
+            # Alternative: Check individual terms
+            elif hasattr(obs_manager, '_terms'):
+                for term_name, term in obs_manager._terms.items():
+                    try:
+                        obs_data = term.func(env, **term.params)
+                        if torch.is_tensor(obs_data):
+                            if obs_data.ndim > 1:
+                                term_has_nan = torch.isnan(obs_data).any(dim=tuple(range(1, obs_data.ndim)))
+                            else:
+                                term_has_nan = torch.isnan(obs_data)
+                            has_nan = torch.logical_or(has_nan, term_has_nan)
+                    except Exception as e:
+                        print(f"Error checking term {term_name}: {e}")
+                        continue
+        
+        # Method 3: Direct check of critical scene data (most reliable)
+        else:
+            # Check robot joint states
+            if hasattr(env.scene, 'robot'):
+                robot = env.scene['robot']
+                if hasattr(robot.data, 'joint_pos'):
+                    joint_pos_nan = torch.isnan(robot.data.joint_pos).any(dim=-1)
+                    has_nan = torch.logical_or(has_nan, joint_pos_nan)
+                
+                if hasattr(robot.data, 'joint_vel'):
+                    joint_vel_nan = torch.isnan(robot.data.joint_vel).any(dim=-1)
+                    has_nan = torch.logical_or(has_nan, joint_vel_nan)
+            
+            # Check end-effector frame
+            if hasattr(env.scene, 'ee_frame'):
+                ee_frame = env.scene['ee_frame']
+                if hasattr(ee_frame.data, 'target_pos_w'):
+                    ee_pos_nan = torch.isnan(ee_frame.data.target_pos_w).any(dim=-1).any(dim=-1)
+                    has_nan = torch.logical_or(has_nan, ee_pos_nan)
+                
+                if hasattr(ee_frame.data, 'target_quat_w'):
+                    ee_quat_nan = torch.isnan(ee_frame.data.target_quat_w).any(dim=-1).any(dim=-1)
+                    has_nan = torch.logical_or(has_nan, ee_quat_nan)
+        
+        # Log NaN occurrences
+        if has_nan.any():
+            nan_env_ids = torch.where(has_nan)[0].tolist()
+            print(f"WARNING: NaN observations detected, terminating environments: {nan_env_ids}")
+    
+    except Exception as e:
+        print(f"Error checking for NaN observations: {e}")
+        # Return no termination in case of error to avoid cascading failures
+        return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    
+    return has_nan

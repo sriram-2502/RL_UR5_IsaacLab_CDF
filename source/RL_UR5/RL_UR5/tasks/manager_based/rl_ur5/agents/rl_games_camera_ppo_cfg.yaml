@@ -1,7 +1,7 @@
 params:
   seed: 42
   env:
-    clip_observations: 100.0
+    clip_observations: 5.0
     clip_actions: 5.0  
   algo:
     name: a2c_continuous
@@ -71,21 +71,21 @@ params:
     normalize_advantage: True
     gamma: 0.99
     tau: 0.95
-    learning_rate: 0.0005
+    learning_rate: 0.0001
     lr_schedule: adaptive
     schedule_type: legacy
     kl_threshold: 0.01
     score_to_win: 10000
     max_epochs: 4000
-    save_best_after: 200
+    save_best_after: 50
     save_frequency: 100
     print_stats: True
     grad_norm: 1.0
-    entropy_coef: 0.001
+    entropy_coef: 0.0005
     truncate_grads: True
     e_clip: 0.2
     horizon_length: 24
-    minibatch_size: 4608  # Adjusted based on our environment's size (num envs × 24 horizon)
+    minibatch_size: 24  # Adjusted based on our environment's size (num envs × 24 horizon)
     mini_epochs: 8
     critic_coef: 2
     clip_value: True
