@@ -17,3 +17,7 @@ python scripts/rl_games/play.py --task=Isaac-UR5-PickAndPlace-PPO --num_envs 2 -
 ```
 tensorboard --logdir logs/rl_games/pick_place_ur5/2025-05-12_08-52-26/
 ```
+
+
+## Script for collecting video data
+python scripts/rl_games/play.py     --task=Isaac-UR5-ObjCameraPoseTracking-PPO     --num_envs 1 --headless     --checkpoint logs/rl_games/camera_pose_tracking_ur5/final_obstacle_random/nn/camera_pose_tracking_ur5.pth     --enable_cameras     --record_camera     --record_duration 2.0     --record_episodes_hf 1500 --record --record_episodes 1500

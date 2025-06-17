@@ -1105,3 +1105,265 @@ def obstacle_avoidance_penalty_tanh(
     penalty = torch.where(distance < safe_distance, penalty, torch.zeros_like(penalty))
     
     return penalty
+
+
+def obstacle_avoidance_penalty_full_arm(
+    env: ManagerBasedRLEnv,
+    obstacle_cfg: SceneEntityCfg = SceneEntityCfg("red_cube"),
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    safe_distance: float = 0.2,
+    danger_distance: float = 0.1,
+    max_penalty: float = -5.0,
+    arm_body_names: list = None,
+    body_weights: dict = None,
+) -> torch.Tensor:
+    """Penalty for getting too close to the dynamic obstacle (considers entire arm).
+    
+    Args:
+        env: The RL environment instance
+        obstacle_cfg: Configuration for the obstacle object
+        robot_cfg: Configuration for the robot
+        safe_distance: Distance at which penalty starts
+        danger_distance: Distance at which maximum penalty is applied
+        max_penalty: Maximum penalty value (should be negative)
+        arm_body_names: List of robot body names to check for collision
+        body_weights: Dictionary of weights for different body parts
+        
+    Returns:
+        torch.Tensor: Penalty based on proximity to obstacle
+    """
+    # Default arm body names for UR5
+    if arm_body_names is None:
+        arm_body_names = [
+            "base_link",
+            "shoulder_link", 
+            "upper_arm_link",
+            "forearm_link",
+            "wrist_1_link",
+            "wrist_2_link", 
+            "wrist_3_link",
+            "ee_link"
+        ]
+    
+    # Default weights (higher weight = more important to avoid collision)
+    if body_weights is None:
+        body_weights = {
+            "base_link": 0.1,      # Base is less likely to hit obstacle
+            "shoulder_link": 0.3,
+            "upper_arm_link": 0.5,
+            "forearm_link": 0.7,
+            "wrist_1_link": 0.8,
+            "wrist_2_link": 0.9,
+            "wrist_3_link": 0.9,
+            "ee_link": 1.0         # End-effector most important
+        }
+    
+    # Get robot and obstacle
+    robot = env.scene[robot_cfg.name]
+    obstacle = env.scene[obstacle_cfg.name]
+    obstacle_position = obstacle.data.root_pos_w[:, :3]
+    
+    # Get body names from robot
+    robot_body_names = robot.body_names
+    
+    # Initialize penalty tensor
+    total_penalty = torch.zeros(env.num_envs, device=env.device)
+    
+    # Check each body part
+    for body_name in arm_body_names:
+        if body_name in robot_body_names:
+            # Get body index
+            body_idx = robot_body_names.index(body_name)
+            
+            # Get body position
+            body_position = robot.data.body_pos_w[:, body_idx, :]
+            
+            # Calculate distance between this body part and obstacle
+            distance = torch.norm(body_position - obstacle_position, p=2, dim=-1)
+            
+            # Calculate penalty for this body part
+            body_penalty = torch.zeros_like(distance)
+            
+            # Apply penalty only when within safe distance
+            within_safe_distance = distance < safe_distance
+            
+            # Exponential penalty that increases as distance decreases
+            normalized_distance = torch.clamp(
+                (distance - danger_distance) / (safe_distance - danger_distance), 
+                0.0, 1.0
+            )
+            penalty_magnitude = max_penalty * (1.0 - normalized_distance) ** 2
+            
+            body_penalty = torch.where(within_safe_distance, penalty_magnitude, body_penalty)
+            
+            # Apply body weight and accumulate
+            body_weight = body_weights.get(body_name, 1.0)
+            total_penalty += body_weight * body_penalty
+    
+    return total_penalty
+
+def obstacle_avoidance_penalty_tanh_full_arm(
+    env: ManagerBasedRLEnv,
+    obstacle_cfg: SceneEntityCfg = SceneEntityCfg("red_cube"),
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    safe_distance: float = 0.2,
+    std: float = 0.1,
+    arm_body_names: list = None,
+    body_weights: dict = None,
+    use_minimum_distance: bool = True,
+) -> torch.Tensor:
+    """Smooth tanh-based penalty for obstacle proximity (considers entire arm).
+    
+    Args:
+        env: The RL environment instance
+        obstacle_cfg: Configuration for the obstacle object
+        robot_cfg: Configuration for the robot
+        safe_distance: Reference distance for penalty calculation
+        std: Standard deviation for tanh function
+        arm_body_names: List of robot body names to check for collision
+        body_weights: Dictionary of weights for different body parts
+        use_minimum_distance: If True, use minimum distance; if False, use weighted sum
+        
+    Returns:
+        torch.Tensor: Smooth penalty based on proximity to obstacle
+    """
+    # Default arm body names for UR5
+    if arm_body_names is None:
+        arm_body_names = [
+            "base_link",
+            "shoulder_link", 
+            "upper_arm_link",
+            "forearm_link",
+            "wrist_1_link",
+            "wrist_2_link", 
+            "wrist_3_link",
+            "ee_link"
+        ]
+    
+    # Default weights
+    if body_weights is None:
+        body_weights = {
+            "base_link": 0.1,
+            "shoulder_link": 0.3,
+            "upper_arm_link": 0.5,
+            "forearm_link": 0.7,
+            "wrist_1_link": 0.8,
+            "wrist_2_link": 0.9,
+            "wrist_3_link": 0.9,
+            "ee_link": 1.0
+        }
+    
+    # Get robot and obstacle
+    robot = env.scene[robot_cfg.name]
+    obstacle = env.scene[obstacle_cfg.name]
+    obstacle_position = obstacle.data.root_pos_w[:, :3]
+    
+    # Get body names from robot
+    robot_body_names = robot.body_names
+    
+    if use_minimum_distance:
+        # Use minimum distance approach (most conservative)
+        min_distances = torch.full((env.num_envs,), float('inf'), device=env.device)
+        
+        for body_name in arm_body_names:
+            if body_name in robot_body_names:
+                body_idx = robot_body_names.index(body_name)
+                body_position = robot.data.body_pos_w[:, body_idx, :]
+                distance = torch.norm(body_position - obstacle_position, p=2, dim=-1)
+                min_distances = torch.min(min_distances, distance)
+        
+        # Apply tanh penalty based on minimum distance
+        penalty = -torch.tanh((safe_distance - min_distances) / std)
+        penalty = torch.where(min_distances < safe_distance, penalty, torch.zeros_like(penalty))
+        
+    else:
+        # Use weighted sum approach
+        total_penalty = torch.zeros(env.num_envs, device=env.device)
+        total_weight = 0.0
+        
+        for body_name in arm_body_names:
+            if body_name in robot_body_names:
+                body_idx = robot_body_names.index(body_name)
+                body_position = robot.data.body_pos_w[:, body_idx, :]
+                distance = torch.norm(body_position - obstacle_position, p=2, dim=-1)
+                
+                # Tanh-based penalty for this body part
+                body_penalty = -torch.tanh((safe_distance - distance) / std)
+                body_penalty = torch.where(distance < safe_distance, body_penalty, torch.zeros_like(body_penalty))
+                
+                # Apply body weight
+                body_weight = body_weights.get(body_name, 1.0)
+                total_penalty += body_weight * body_penalty
+                total_weight += body_weight
+        
+        # Normalize by total weight
+        penalty = total_penalty / total_weight if total_weight > 0 else total_penalty
+    
+    return penalty
+
+def obstacle_avoidance_penalty_adaptive(
+    env: ManagerBasedRLEnv,
+    obstacle_cfg: SceneEntityCfg = SceneEntityCfg("red_cube"),
+    robot_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+    safe_distance: float = 0.2,
+    std: float = 0.1,
+    critical_bodies: list = None,
+    penalty_scale: float = 2.0,
+) -> torch.Tensor:
+    """Adaptive penalty that focuses on the closest body parts to the obstacle.
+    
+    Args:
+        env: The RL environment instance
+        obstacle_cfg: Configuration for the obstacle object
+        robot_cfg: Configuration for the robot
+        safe_distance: Reference distance for penalty calculation
+        std: Standard deviation for tanh function
+        critical_bodies: Most important body parts to protect
+        penalty_scale: Scaling factor for penalty
+        
+    Returns:
+        torch.Tensor: Adaptive penalty based on closest body parts
+    """
+    # Critical body parts that should avoid collision at all costs
+    if critical_bodies is None:
+        critical_bodies = ["forearm_link", "wrist_1_link", "wrist_2_link", "wrist_3_link", "ee_link"]
+    
+    # All body parts to consider
+    all_bodies = ["base_link", "shoulder_link", "upper_arm_link", "forearm_link", 
+                  "wrist_1_link", "wrist_2_link", "wrist_3_link", "ee_link"]
+    
+    # Get robot and obstacle
+    robot = env.scene[robot_cfg.name]
+    obstacle = env.scene[obstacle_cfg.name]
+    obstacle_position = obstacle.data.root_pos_w[:, :3]
+    robot_body_names = robot.body_names
+    
+    # Calculate distances for all body parts
+    body_distances = {}
+    for body_name in all_bodies:
+        if body_name in robot_body_names:
+            body_idx = robot_body_names.index(body_name)
+            body_position = robot.data.body_pos_w[:, body_idx, :]
+            distance = torch.norm(body_position - obstacle_position, p=2, dim=-1)
+            body_distances[body_name] = distance
+    
+    # Find the closest body part for each environment
+    penalty = torch.zeros(env.num_envs, device=env.device)
+    
+    for env_id in range(env.num_envs):
+        min_distance = float('inf')
+        closest_body = None
+        
+        # Find closest body part
+        for body_name, distances in body_distances.items():
+            if distances[env_id] < min_distance:
+                min_distance = distances[env_id].item()
+                closest_body = body_name
+        
+        # Apply penalty based on closest body
+        if closest_body and min_distance < safe_distance:
+            # Higher penalty if critical body is closest
+            scale = penalty_scale if closest_body in critical_bodies else 1.0
+            penalty[env_id] = -scale * torch.tanh((safe_distance - min_distance) / std)
+    
+    return penalty

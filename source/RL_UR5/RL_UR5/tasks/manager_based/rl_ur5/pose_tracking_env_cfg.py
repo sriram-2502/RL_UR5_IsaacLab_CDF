@@ -130,10 +130,10 @@ class CommandsCfg:
     tracking_pose = mdp.UniformPoseCommandCfg(
         asset_name="robot",
         body_name="ee_link",  
-        resampling_time_range=(8.0, 8.0),
+        resampling_time_range=(4.0, 4.0),
         debug_vis=True,
         ranges=mdp.UniformPoseCommandCfg.Ranges(
-            pos_x=(0.3, 0.7), pos_y=(0.4, 0.5), pos_z=(-0.1, 0.2), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(0.0, 0.0)
+            pos_x=(0.3, 0.7), pos_y=(-0.6, 0.6), pos_z=(-0.1, 0.2), roll=(0.0, 0.0), pitch=(1.57, 1.57), yaw=(0.0, 0.0)
         ),
     )
 
@@ -196,15 +196,15 @@ class ObservationsCfg:
         )
         
         # End-effector pose
-        ee_pose = ObsTerm(func=mdp.end_effector_pose)
+        # ee_pose = ObsTerm(func=mdp.end_effector_pose)
     
         
         # Target position (for the end-effector)
         target_position = ObsTerm(func=mdp.generated_commands, params={"command_name": "tracking_pose"})
-        
+        print('target_position', target_position)
 
         # Actions
-        actions = ObsTerm(func=mdp.last_action)
+        # actions = ObsTerm(func=mdp.last_action)
 
         
         def __post_init__(self):
@@ -273,20 +273,20 @@ class RewardsCfg:
         },
     )
 
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=0.0)
-    joint_vel = RewTerm(
-        func=mdp.joint_vel_l2,
-        weight=0.0,
-        params={"asset_cfg": SceneEntityCfg("robot")},
-    )
+    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.00001)
+    # joint_vel = RewTerm(
+    #     func=mdp.joint_vel_l2,
+    #     weight=0.00001,
+    #     params={"asset_cfg": SceneEntityCfg("robot")},
+    # )
 
     
     # In the RewardsCfg class in rl_ur5_env_cfg.py
-    joint_torques_penalty = RewTerm(
-        func=mdp.joint_torques_l2,
-        params={"asset_cfg": SceneEntityCfg("robot")},
-        weight=0.0,  # Adjust weight as needed
-    )
+    # joint_torques_penalty = RewTerm(
+    #     func=mdp.joint_torques_l2,
+    #     params={"asset_cfg": SceneEntityCfg("robot")},
+    #     weight=0.000001,  # Adjust weight as needed
+    # )
 
     # # In RewardsCfg class
     # success_reward = RewTerm(
@@ -378,8 +378,8 @@ class PoseTrackingEnvCfg(ManagerBasedRLEnvCfg):
     # MDP settings
     rewards: RewardsCfg = RewardsCfg()
     terminations: TerminationsCfg = TerminationsCfg()
-    curriculum: CurriculumCfg = CurriculumCfg()
-    # curriculum = None
+    # curriculum: CurriculumCfg = CurriculumCfg()
+    curriculum = None
 
     # Unused managers
     commands: CommandsCfg = CommandsCfg()  # Add the command configuration

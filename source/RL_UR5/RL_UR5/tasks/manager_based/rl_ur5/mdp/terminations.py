@@ -414,3 +414,4 @@ def nan_observation_termination(
         return torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
     
     return has_nan
+

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import torch
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, Any, List
 import isaaclab.utils.math as math_utils
 import random
 from .thresholds import *  # Import all constants from thresholds
@@ -951,5 +951,101 @@ def reset_robot_when_stuck_at_table(
             joint_ids=joint_indices, 
             env_ids=torch.tensor([env_id], device=env.device)
         )
+    
+    return {}
+
+
+def start_recording_on_reset(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+    recorder_config: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """
+    Event function to initialize and manage recording on episode reset.
+    
+    Args:
+        env: The RL environment instance
+        env_ids: Environment IDs that are resetting
+        recorder_config: Optional recorder configuration dictionary
+        
+    Returns:
+        Empty dictionary
+    """
+    # Default recorder config
+    default_config = {
+        "enable_recording": False,
+        "output_dir": "./logs/recordings",
+        "camera_name": "tiled_camera_right",
+        "max_episodes": 5,
+        "record_video": True,
+        "record_robot_states": True,
+        "record_actions": True,
+    }
+    
+    # Merge with provided config
+    if recorder_config is not None:
+        config = {**default_config, **recorder_config}
+    else:
+        config = default_config
+    
+    # Skip if recording is disabled
+    if not config.get("enable_recording", False):
+        return {}
+    
+    try:
+        # Import recorder here to avoid circular imports
+        from .recorder import EnvironmentRecorder, RecordingEventManager
+        
+        # Initialize recorder if not exists
+        if not hasattr(env, '_recorder'):
+            env._recorder = EnvironmentRecorder(
+                env=env,
+                output_dir=config["output_dir"],
+                record_video=config["record_video"],
+                record_robot_states=config["record_robot_states"],
+                record_actions=config["record_actions"],
+                camera_name=config["camera_name"]
+            )
+            env._recording_manager = RecordingEventManager(env._recorder)
+            env._recording_manager.max_episodes = config["max_episodes"]
+            print(f"[INFO] Initialized recorder - will record up to {config['max_episodes']} episodes")
+            print(f"[INFO] Output directory: {config['output_dir']}")
+        
+        # Handle recording on reset
+        if hasattr(env, '_recording_manager'):
+            env._recording_manager.on_reset(env, env_ids)
+        
+    except ImportError as e:
+        print(f"[WARNING] Could not initialize recorder: {e}")
+        print("[WARNING] Continuing without recording...")
+    except Exception as e:
+        print(f"[ERROR] Recording initialization failed: {e}")
+        print("[ERROR] Continuing without recording...")
+    
+    return {}
+
+
+def record_step_data_event(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor,
+) -> Dict[str, Any]:
+    """
+    Event function to record step data during episodes.
+    
+    Args:
+        env: The RL environment instance
+        env_ids: Environment IDs 
+        
+    Returns:
+        Empty dictionary
+    """
+    # This would be called as an interval event if needed
+    # For now, we handle recording in the main step loop
+    if hasattr(env, '_recording_manager') and hasattr(env, '_last_actions'):
+        try:
+            env._recording_manager.on_step(env, env._last_actions)
+        except Exception as e:
+            # Silently continue if recording fails
+            pass
     
     return {}
