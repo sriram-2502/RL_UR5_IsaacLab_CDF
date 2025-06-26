@@ -1,5 +1,6 @@
 """
 Direct RL Environment for Object Camera Pose Tracking with UR5 Robot
+Enhanced with Domain Randomization for Sim2Real Transfer
 
 This implements a multi-observation space environment compatible with skrl.
 """
@@ -68,8 +69,6 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
     marker_cfg.prim_path = "/Visuals/FrameTransformer"
     
-
-
     # UR5 Robot
     robot_cfg: ArticulationCfg = UR5_GRIPPER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
@@ -88,36 +87,10 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.6, 0.0, -0.0234), 
+            pos=(0.65, 0.0, 0.0), 
             rot=(1.0, 0.0, 0.0, 0.0)
         ),
     )
-
-    # Arm configuration - dynamic object for collision avoidance
-    arm_cfg: RigidObjectCfg = RigidObjectCfg(
-        prim_path="/World/envs/env_.*/arm",
-        spawn=sim_utils.UsdFileCfg(
-            usd_path="/home/adi2440/Desktop/ur5_isaacsim/usd/arm.usd",
-            scale=(0.01, 0.01, 0.01),  # Ensure no scaling
-            rigid_props=sim_utils.RigidBodyPropertiesCfg(
-                rigid_body_enabled=True,
-                kinematic_enabled=False,  # Changed to dynamic
-                disable_gravity=True,
-                max_linear_velocity=1000.0,
-                max_angular_velocity=1000.0,
-                max_depenetration_velocity=100.0,
-            ),
-            mass_props=sim_utils.MassPropertiesCfg(mass=5.0),  # Give it some mass
-            collision_props=sim_utils.CollisionPropertiesCfg(
-                collision_enabled=True  # Enable collision
-            ),
-        ),
-        init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.9, 0.0, 0.9), 
-            rot=(0.70711, 0.70711, 0.0, 0.0)
-        ),
-    )
-
 
     # White plane configuration
     white_plane_cfg: RigidObjectCfg = RigidObjectCfg(
@@ -140,7 +113,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.2, 0.0, 0.8),
+            pos=(0.2, 0.0, 0.85925),
             rot=(0.70711, 0.0, 0.70711, 0.0)
         ),
     )
@@ -155,10 +128,34 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
                 prim_path="/World/envs/env_.*/Robot/ee_link",
                 name="end_effector",
                 offset=OffsetCfg(
-                    pos=[0.1226, 0.0, 0.0],
+                    pos=[0.12, 0.0, 0.0],
                 ),
             ),
         ],
+    )
+
+    # Red cube - dynamic obstacle
+    red_cube_cfg: RigidObjectCfg = RigidObjectCfg(
+        prim_path="/World/envs/env_.*/red_cube",
+        spawn=sim_utils.CuboidCfg(
+            size=(0.191,0.0572, 0.0635),
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                rigid_body_enabled=True,
+                max_linear_velocity=1000.0,
+                max_angular_velocity=1000.0,
+                max_depenetration_velocity=100.0,
+            ),
+            mass_props=sim_utils.MassPropertiesCfg(mass=0.1),
+            collision_props=sim_utils.CollisionPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=(1.0, 0.0, 0.0),
+                metallic=0.0,
+                roughness=0.5
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(0.5, 0.0, 0.97),
+        ),
     )
     
     # Camera
@@ -175,14 +172,14 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
         width=224,
         height=224,
         offset=TiledCameraCfg.OffsetCfg(
-            pos=(1.27, 0.06, 1.143),
-            rot=(0.56099,0.43046,0.43406,0.56099),
+            pos=(1.17, 0.06, 1.143),
+            rot=(0.62933, 0.32239, 0.32239, 0.62933),
             convention="opengl"
         )
     )
 
     # Basic environment settings
-    episode_length_s = 6.0
+    episode_length_s = 4.0
     decimation = 4
     action_scale = 0.5  # Reduced for smoother movements
     state_dim = 19
@@ -190,7 +187,6 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Observation and action spaces
     action_space = gym.spaces.Box(low=-3.5, high=3.5, shape=(6,))
     state_space = 0
-    ## For PPO
     observation_space = gym.spaces.Dict({
         "image": gym.spaces.Box(low=float("-inf"), high=float("inf"), shape=(80, 100, 3)),
         "state": gym.spaces.Box(low=float("-inf"), high=float("inf"), shape=(state_dim,)),
@@ -218,45 +214,48 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Viewer settings
     viewer = ViewerCfg(eye=(7.5, 7.5, 7.5), origin_type="world", env_index=0)
-    
-    #Progressively increase difficulty(Curriculum learning)
 
     # Command/target pose settings
     target_pose_range = {
-        "x": (0.5, 0.7),
+        "x": (0.3, 0.8),
         "y": (0.4, 0.5),
-        "z": (-0.2, 0.2),  # wrt base link of robot [-80mm to +320mm] irl
+        "z": (-0.2, 0.2),
         "roll": (0.0, 0.0),
         "pitch": (1.57, 1.57),
         "yaw": (0.0, 0.0),
     }
-
-    target_ee_bounds = {
-        "x": (0.35, 0.85),
-        "y": (-0.6, 0.6),
-        "z": (-0.4, 0.4),  # wrt base link of robot [-80mm to +320mm] irl
-    }
-
     command_resampling_time = 3.0
     
-    # Human arm movement settings
-    arm_position_bounds = {
-        "x": (0.85, 1.0),
-        "y": (-0.45, 0.45),
-        "z": (0.80, 1.0),
+    # Obstacle movement settings
+    obstacle_movement_type = "random_smooth"
+    obstacle_center_pos = [0.5, 0.0, 1.0]
+    obstacle_radius = 0.75
+    obstacle_speed = 0.8
+    obstacle_height_variation = 0.5
+    obstacle_diagonal_bounds = {
+        "x_min": 0.3,
+        "x_max": 0.6,
+        "y_min": -0.35,
+        "y_max": 0.35,
     }
-    arm_movement_speed = 0.5  # Speed of random movement
+    obstacle_reset_bounds = {
+        "x_min": 0.2,
+        "x_max": 0.6,
+        "y_min": -0.3,
+        "y_max": 0.3,
+        "z": 0.97,
+    }
     
     # Reward settings
-    reward_distance_weight = -2.5
-    reward_distance_tanh_weight = 1.5
+    reward_distance_weight = -1.5
+    reward_distance_tanh_weight = 1.0
     reward_distance_tanh_std = 0.1
-    reward_orientation_weight = -0.2
+    reward_orientation_weight = -1.2
     reward_torque_weight = -0.0005
-    reward_table_collision_weight = -5.0
-    reward_arm_avoidance_weight = 1.0  # Changed from obstacle
+    reward_table_collision_weight = -10.0
+    reward_obstacle_avoidance_weight = 10.0
+    reward_obstacle_smooth_weight = 3.0
     reward_action_penalty_weight = -0.01
-    # reward_bounds_violation_weight = -20.0  # New penalty for leaving bounds
     
     # Action filter settings
     action_filter_order = 2
@@ -268,7 +267,6 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     orientation_threshold = 0.1
     velocity_threshold = 0.05
     torque_threshold = 1.0
-    bounds_safety_margin = 0.1  # 0.1m margin for bounds checking
     
     # Camera preprocessing settings
     camera_crop_top = 50
@@ -276,14 +274,63 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     camera_target_height = 80
     camera_target_width = 100
     
-    # Noise settings
-    joint_pos_noise_min = -0.01
-    joint_pos_noise_max = 0.01
-    joint_vel_noise_min = -0.001
-    joint_vel_noise_max = 0.001
+    # ============ ORIGINAL NOISE SETTINGS (KEPT FOR REFERENCE) ============
+    # joint_pos_noise_min = -0.01
+    # joint_pos_noise_max = 0.01
+    # joint_vel_noise_min = -0.001
+    # joint_vel_noise_max = 0.001
+    
+    # ============ NEW DOMAIN RANDOMIZATION SETTINGS ============
+    # Enable/disable domain randomization
+    enable_domain_randomization = True
+    
+    # Joint observation noise (enhanced from original)
+    joint_pos_noise_std = 0.015  # Standard deviation for Gaussian noise
+    joint_vel_noise_std = 0.01   # Standard deviation for velocity noise
+    
+    # Camera domain randomization
+    camera_brightness_range = (0.7, 1.3)     # Multiplicative brightness factor
+    camera_contrast_range = (0.8, 1.2)       # Contrast adjustment
+    camera_noise_std = 0.02                  # Gaussian noise on pixels
+    camera_blur_probability = 0.3            # Probability of applying blur
+    camera_blur_kernel_range = (3, 7)        # Blur kernel size range
+    
+    # Camera pose randomization (simulates mounting errors)
+    camera_pos_noise_std = 0.02              # Position noise in meters
+    camera_rot_noise_std = 0.05              # Rotation noise in radians
+    
+    # Action domain randomization
+    action_noise_std = 0.01                  # Noise added to actions
+    action_delay_range = (0, 3)              # Delay in timesteps (0-3 steps)
+    action_delay_probability = 0.2           # Probability of action delay
+    
+    # Control frequency randomization (simulates timing variations)
+    control_freq_variation = 0.1             # ±10% frequency variation
+    
+    # Dynamics randomization
+    joint_friction_range = (0.05, 0.3)       # Joint friction multiplier
+    joint_damping_range = (0.8, 1.2)         # Joint damping multiplier
+    link_mass_range = (0.9, 1.1)             # Link mass multiplier
+    payload_mass_range = (0.0, 0.5)          # Random payload at end-effector (kg)
+    
+    # Kinematic calibration errors
+    joint_offset_std = 0.002                 # Joint position offset (rad)
+    link_length_std = 0.005                  # Link length errors (m)
+    
+    # End-effector pose observation noise
+    ee_pos_noise_std = 0.01                  # End-effector position noise
+    ee_quat_noise_std = 0.02                 # End-effector quaternion noise
+    
+    # Target pose noise (simulates perception errors)
+    target_pos_noise_std = 0.005             # Target position noise
+    target_quat_noise_std = 0.01             # Target quaternion noise
+    
+    # Physics simulation variations
+    gravity_variation = 0.02                 # ±2% gravity variation
+    sim_dt_variation = 0.1                   # ±10% timestep variation
     
     # Reset settings
-    robot_base_pose = [-0.568, -0.858,  1.402, -2.185, -1.6060665,  1.64142667]
+    robot_base_pose = [-0.568, -0.858,  1.402, -2.585, -1.6060665,  1.64142667]
     robot_reset_noise_range = 0.01
 
 
@@ -323,12 +370,13 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         )
         self._target_poses = torch.zeros((self.num_envs, 7), device=self.device)
         self._command_time_left = torch.zeros(self.num_envs, device=self.device)
-        
-        # Arm movement state
-        self._arm_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
+        self._obstacle_time = torch.zeros(self.num_envs, device=self.device)
         
         # Initialize action filter
         self._setup_action_filter()
+        
+        # ============ NEW: Initialize domain randomization buffers ============
+        self._setup_domain_randomization()
         
         # Performance tracking
         self._episode_sums = {
@@ -340,16 +388,127 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Log initial information
         print(f"[INFO] Environment initialized with {self.num_envs} environments")
         print(f"[INFO] Action scale: {self.cfg.action_scale}")
+        print(f"[INFO] Domain Randomization: {'ENABLED' if self.cfg.enable_domain_randomization else 'DISABLED'}")
         print(f"[INFO] Target pose range X: {self.cfg.target_pose_range['x']}")
         print(f"[INFO] Target pose range Y: {self.cfg.target_pose_range['y']}")
         print(f"[INFO] Target pose range Z: {self.cfg.target_pose_range['z']}")
-        print(f"[INFO] Arm bounds X: {self.cfg.arm_position_bounds['x']}")
-        print(f"[INFO] Arm bounds Y: {self.cfg.arm_position_bounds['y']}")
-        print(f"[INFO] Arm bounds Z: {self.cfg.arm_position_bounds['z']}")
         
         # Setup debug visualization if enabled
         self.set_debug_vis(self.cfg.debug_vis)
 
+    def _setup_domain_randomization(self):
+        """Initialize domain randomization buffers and parameters."""
+        if not self.cfg.enable_domain_randomization:
+            return
+            
+        # Action delay buffers
+        self._action_delay_buffer = torch.zeros(
+            (self.num_envs, self.cfg.action_delay_range[1], len(self._joint_indices)), 
+            device=self.device
+        )
+        self._action_delay_steps = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        
+        # Joint calibration errors (constant per episode)
+        self._joint_offset_errors = torch.zeros(
+            (self.num_envs, len(self._joint_indices)), device=self.device
+        )
+        
+        # Camera calibration errors (constant per episode)
+        self._camera_pos_errors = torch.zeros((self.num_envs, 3), device=self.device)
+        self._camera_rot_errors = torch.zeros((self.num_envs, 3), device=self.device)
+        
+        # Dynamics parameters (per environment)
+        self._joint_friction_multipliers = torch.ones(
+            (self.num_envs, len(self._joint_indices)), device=self.device
+        )
+        self._joint_damping_multipliers = torch.ones(
+            (self.num_envs, len(self._joint_indices)), device=self.device
+        )
+        self._payload_masses = torch.zeros(self.num_envs, device=self.device)
+        
+        # Control frequency variations
+        self._control_freq_multipliers = torch.ones(self.num_envs, device=self.device)
+        
+        # Initialize randomization on first reset
+        self._randomize_domain_parameters(torch.arange(self.num_envs, device=self.device))
+
+    def _randomize_domain_parameters(self, env_ids):
+        """Randomize domain parameters for specified environments."""
+        if not self.cfg.enable_domain_randomization or len(env_ids) == 0:
+            return
+            
+        num_envs = len(env_ids)
+        
+        # Joint calibration errors
+        self._joint_offset_errors[env_ids] = torch.randn(
+            (num_envs, len(self._joint_indices)), device=self.device
+        ) * self.cfg.joint_offset_std
+        
+        # Camera calibration errors
+        self._camera_pos_errors[env_ids] = torch.randn(
+            (num_envs, 3), device=self.device
+        ) * self.cfg.camera_pos_noise_std
+        
+        self._camera_rot_errors[env_ids] = torch.randn(
+            (num_envs, 3), device=self.device
+        ) * self.cfg.camera_rot_noise_std
+        
+        # Joint friction and damping
+        self._joint_friction_multipliers[env_ids] = sample_uniform(
+            self.cfg.joint_friction_range[0],
+            self.cfg.joint_friction_range[1],
+            (num_envs, len(self._joint_indices)),
+            self.device
+        )
+        
+        self._joint_damping_multipliers[env_ids] = sample_uniform(
+            self.cfg.joint_damping_range[0],
+            self.cfg.joint_damping_range[1],
+            (num_envs, len(self._joint_indices)),
+            self.device
+        )
+        
+        # Payload masses
+        self._payload_masses[env_ids] = sample_uniform(
+            self.cfg.payload_mass_range[0],
+            self.cfg.payload_mass_range[1],
+            (num_envs,),
+            self.device
+        )
+        
+        # Control frequency variations
+        self._control_freq_multipliers[env_ids] = sample_uniform(
+            1.0 - self.cfg.control_freq_variation,
+            1.0 + self.cfg.control_freq_variation,
+            (num_envs,),
+            self.device
+        )
+        
+        # Apply dynamics randomization to robot
+        self._apply_dynamics_randomization(env_ids)
+
+    def _apply_dynamics_randomization(self, env_ids):
+        """Apply randomized dynamics parameters to the robot."""
+        if not self.cfg.enable_domain_randomization or len(env_ids) == 0:
+            return
+            
+        # Apply joint friction and damping
+        for i, joint_idx in enumerate(self._joint_indices):
+            # Get current joint properties
+            friction = self._robot.data.joint_friction_coefficient[:, joint_idx]
+            damping = self._robot.data.joint_damping_coefficient[:, joint_idx]
+            
+            # Apply multipliers
+            friction[env_ids] *= self._joint_friction_multipliers[env_ids, i]
+            damping[env_ids] *= self._joint_damping_multipliers[env_ids, i]
+            
+            # Write back to simulation
+            self._robot.write_joint_properties_to_sim(
+                friction=friction,
+                damping=damping,
+                joint_ids=[joint_idx],
+                env_ids=env_ids
+            )
 
     def close(self):
         """Cleanup for the environment."""
@@ -361,7 +520,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self._robot = Articulation(self.cfg.robot_cfg)
         self._tiled_camera = TiledCamera(self.cfg.tiled_camera)
         self._ee_frame = FrameTransformer(self.cfg.ee_frame_cfg)
-        self._arm = RigidObject(self.cfg.arm_cfg)
+        self._red_cube = RigidObject(self.cfg.red_cube_cfg)
         
         # Create static assets
         self._table = RigidObject(self.cfg.table_cfg)
@@ -374,7 +533,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self.scene.articulations["robot"] = self._robot
         self.scene.sensors["tiled_camera"] = self._tiled_camera
         self.scene.sensors["ee_frame"] = self._ee_frame
-        self.scene.rigid_objects["arm"] = self._arm
+        self.scene.rigid_objects["red_cube"] = self._red_cube
         
         # Add static assets to scene registry
         self.scene.rigid_objects["table"] = self._table
@@ -394,7 +553,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         dir_light_cfg = sim_utils.DistantLightCfg(intensity=1000.0, color=(1.0, 1.0, 0.9), angle=0.53)
         dir_light_cfg.func("/World/DirectionalLight", dir_light_cfg)
 
-        
     def _setup_action_filter(self):
         """Initialize action filter states and coefficients."""
         num_joints = len(self._joint_indices)
@@ -424,6 +582,15 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self.actions = actions.clone().clamp(-3.5, 3.5)
         self._previous_actions = self.actions.clone()
         
+        # ============ NEW: Apply action domain randomization ============
+        if self.cfg.enable_domain_randomization:
+            # Add action noise
+            action_noise = torch.randn_like(self.actions) * self.cfg.action_noise_std
+            self.actions += action_noise
+            
+            # Apply action delays
+            self.actions = self._apply_action_delays(self.actions)
+        
         # Apply action filtering
         filtered_actions = self._apply_action_filter(self.actions)
         
@@ -432,6 +599,10 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         # Update command timer
         self._command_time_left -= self.physics_dt
+        
+        # ============ NEW: Apply control frequency variation ============
+        if self.cfg.enable_domain_randomization:
+            self._command_time_left -= self.physics_dt * (self._control_freq_multipliers - 1.0)
         
         # --- resample target poses when timer runs out ---
         expired_mask = self._command_time_left <= 0.0
@@ -442,15 +613,35 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             # reset their countdown
             self._command_time_left[expired_mask] = self.cfg.command_resampling_time
         
-        #IF robot is stuck at the table, reset it
+        # IF robot is stuck at the table, reset it
         self._reset_robot_when_stuck_at_table()
 
-        # Update arm position
-        self._update_arm_position()
+        # Update obstacle
+        self._update_obstacle_position()
 
+    def _apply_action_delays(self, actions: torch.Tensor) -> torch.Tensor:
+        """Apply randomized action delays to simulate control latency."""
+        if not self.cfg.enable_domain_randomization:
+            return actions
+            
+        # Update action delay buffer
+        self._action_delay_buffer = torch.roll(self._action_delay_buffer, shifts=1, dims=1)
+        self._action_delay_buffer[:, 0] = actions
+        
+        # Get delayed actions based on per-environment delay
+        delayed_actions = actions.clone()
+        for i in range(self.num_envs):
+            delay = self._action_delay_steps[i]
+            if delay > 0:
+                delayed_actions[i] = self._action_delay_buffer[i, delay]
+        
+        return delayed_actions
         
     def _apply_action(self) -> None:
         """Apply the processed actions to the robot."""
+        # Get current joint positions
+        # current_joint_pos = self._robot.data.joint_pos[:, self._joint_indices]
+        
         # Add actions to current positions 
         self._robot_dof_targets = self.actions
         
@@ -530,50 +721,45 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             idx = env_ids.index(0)
             print(f"[DEBUG] New target for env 0: pos=[{x[idx].item():.3f}, {y[idx].item():.3f}, {z[idx].item():.3f}]")
 
-    def _update_arm_position(self):
-        """Update the human arm position with random movement."""
-        # Get current arm positions and orientations
-        arm_positions = self._arm.data.root_pos_w.clone()
-        arm_quats = self._arm.data.root_quat_w.clone()
+    def _update_obstacle_position(self):
+        """Update the dynamic obstacle position."""
+        self._obstacle_time += self.physics_dt
+        
+        # Get current obstacle positions
+        obstacle_positions = self._red_cube.data.root_pos_w.clone()
         
         for i in range(self.num_envs):
-            # Update target positions with random walk
-            # Position random walk
-            pos_noise = (torch.rand(3, device=self.device) - 0.5) * 2.0 * self.cfg.arm_movement_speed * self.physics_dt
-            self._arm_target_pos[i] += pos_noise
+            time = self._obstacle_time[i].item()
             
-            # Clamp to bounds
-            self._arm_target_pos[i, 0] = torch.clamp(
-                self._arm_target_pos[i, 0],
-                self.cfg.arm_position_bounds["x"][0],
-                self.cfg.arm_position_bounds["x"][1]
-            )
-            self._arm_target_pos[i, 1] = torch.clamp(
-                self._arm_target_pos[i, 1],
-                self.cfg.arm_position_bounds["y"][0],
-                self.cfg.arm_position_bounds["y"][1]
-            )
-            self._arm_target_pos[i, 2] = torch.clamp(
-                self._arm_target_pos[i, 2],
-                self.cfg.arm_position_bounds["z"][0],
-                self.cfg.arm_position_bounds["z"][1]
-            )
-            
-            # Smooth movement towards target
-            alpha_pos = 0.1  # Position smoothing factor
-            
-            # Update position in world frame
-            local_pos = arm_positions[i, :3] - self.scene.env_origins[i, :3]
-            new_local_pos = (1 - alpha_pos) * local_pos + alpha_pos * self._arm_target_pos[i]
-            arm_positions[i, :3] = new_local_pos + self.scene.env_origins[i, :3]
+            if self.cfg.obstacle_movement_type == "random_smooth":
+                # Smooth random movement using multiple sine waves
+                x = self.cfg.obstacle_center_pos[0] + 0.1 * (
+                    math.sin(self.cfg.obstacle_speed * time) + 
+                    0.5 * math.sin(1.7 * self.cfg.obstacle_speed * time)
+                )
+                y = self.cfg.obstacle_center_pos[1] + 0.1 * (
+                    math.cos(0.8 * self.cfg.obstacle_speed * time) + 
+                    0.3 * math.cos(2.3 * self.cfg.obstacle_speed * time)
+                )
+                z = self.cfg.obstacle_center_pos[2] + self.cfg.obstacle_height_variation * math.sin(
+                    1.5 * self.cfg.obstacle_speed * time
+                )
+                
+                # Update position in world frame
+                obstacle_positions[i, 0] = x + self.scene.env_origins[i, 0]
+                obstacle_positions[i, 1] = y + self.scene.env_origins[i, 1]
+                obstacle_positions[i, 2] = z + self.scene.env_origins[i, 2]
         
-        # Apply new poses (keep original orientation)
-        self._arm.write_root_pose_to_sim(
-            torch.cat([arm_positions, arm_quats], dim=-1)
+        # Apply new positions
+        self._red_cube.write_root_pose_to_sim(
+            torch.cat([
+                obstacle_positions,
+                self._red_cube.data.root_quat_w
+            ], dim=-1)
         )
         
         # Reset velocities for smooth motion
-        self._arm.write_root_velocity_to_sim(
+        self._red_cube.write_root_velocity_to_sim(
             torch.zeros((self.num_envs, 6), device=self.device)
         )
         
@@ -591,43 +777,68 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         return observations
 
     def _get_state_observations(self) -> torch.Tensor:
-        """Get state-based observations."""
-        # Get joint positions with noise
+        """Get state-based observations with domain randomization."""
+        # Get joint positions
         joint_pos = self._robot.data.joint_pos[:, self._joint_indices]
-        if self.cfg.joint_pos_noise_max > 0:
-            joint_pos_noise = torch.rand_like(joint_pos) * (
-                self.cfg.joint_pos_noise_max - self.cfg.joint_pos_noise_min
-            ) + self.cfg.joint_pos_noise_min
+        
+        # ============ NEW: Apply joint calibration errors ============
+        if self.cfg.enable_domain_randomization:
+            joint_pos = joint_pos + self._joint_offset_errors
+        
+        # ============ NEW: Apply enhanced joint position noise ============
+        if self.cfg.enable_domain_randomization:
+            joint_pos_noise = torch.randn_like(joint_pos) * self.cfg.joint_pos_noise_std
             joint_pos_noisy = joint_pos + joint_pos_noise
         else:
-            joint_pos_noisy = joint_pos
+            # Fallback to original uniform noise
+            joint_pos_noise = torch.rand_like(joint_pos) * 0.02 - 0.01
+            joint_pos_noisy = joint_pos + joint_pos_noise
         
-        # Get joint velocities with noise
+        # Get joint velocities
         joint_vel = self._robot.data.joint_vel[:, self._joint_indices]
-        if self.cfg.joint_vel_noise_max > 0:
-            joint_vel_noise = torch.rand_like(joint_vel) * (
-                self.cfg.joint_vel_noise_max - self.cfg.joint_vel_noise_min
-            ) + self.cfg.joint_vel_noise_min
+        
+        # ============ NEW: Apply enhanced joint velocity noise ============
+        if self.cfg.enable_domain_randomization:
+            joint_vel_noise = torch.randn_like(joint_vel) * self.cfg.joint_vel_noise_std
             joint_vel_noisy = joint_vel + joint_vel_noise
         else:
-            joint_vel_noisy = joint_vel
+            # Fallback to original uniform noise
+            joint_vel_noise = torch.rand_like(joint_vel) * 0.002 - 0.001
+            joint_vel_noisy = joint_vel + joint_vel_noise
         
-        # Get target pose (already in robot base frame)
+        # Get target pose
         target_pose = self._target_poses
+        
+        # ============ NEW: Apply target pose noise (perception errors) ============
+        if self.cfg.enable_domain_randomization:
+            target_pos_noise = torch.randn((self.num_envs, 3), device=self.device) * self.cfg.target_pos_noise_std
+            target_quat_noise = torch.randn((self.num_envs, 4), device=self.device) * self.cfg.target_quat_noise_std
+            
+            target_pose_noisy = target_pose.clone()
+            target_pose_noisy[:, :3] += target_pos_noise
+            target_pose_noisy[:, 3:7] += target_quat_noise
+            # Normalize quaternions
+            target_pose_noisy[:, 3:7] = math_utils.normalize(target_pose_noisy[:, 3:7])
+        else:
+            target_pose_noisy = target_pose
         
         # Concatenate all state observations
         state_obs = torch.cat([
             joint_pos_noisy,      # 6 dims
             joint_vel_noisy,      # 6 dims
-            target_pose,          # 7 dims
+            target_pose_noisy,    # 7 dims
         ], dim=-1)
         
         return state_obs
     
     def _get_camera_observations(self) -> torch.Tensor:
-        """Get and preprocess camera observations."""
+        """Get and preprocess camera observations with domain randomization."""
         # Get camera data
         camera_data = self._tiled_camera.data.output["rgb"] / 255.0  # Shape: (num_envs, H, W, C)
+        
+        # ============ NEW: Apply camera domain randomization ============
+        if self.cfg.enable_domain_randomization:
+            camera_data = self._apply_camera_domain_randomization(camera_data)
         
         # Mean subtraction for normalization
         mean_tensor = torch.mean(camera_data, dim=(1, 2), keepdim=True)
@@ -655,6 +866,60 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         return resized
     
+    def _apply_camera_domain_randomization(self, camera_data: torch.Tensor) -> torch.Tensor:
+        """Apply various camera domain randomization techniques."""
+        # camera_data shape: (num_envs, H, W, C)
+        
+        # 1. Brightness adjustment
+        brightness_factors = sample_uniform(
+            self.cfg.camera_brightness_range[0],
+            self.cfg.camera_brightness_range[1],
+            (self.num_envs, 1, 1, 1),
+            self.device
+        )
+        camera_data = camera_data * brightness_factors
+        
+        # 2. Contrast adjustment
+        contrast_factors = sample_uniform(
+            self.cfg.camera_contrast_range[0],
+            self.cfg.camera_contrast_range[1],
+            (self.num_envs, 1, 1, 1),
+            self.device
+        )
+        mean = torch.mean(camera_data, dim=(1, 2, 3), keepdim=True)
+        camera_data = (camera_data - mean) * contrast_factors + mean
+        
+        # 3. Gaussian noise
+        noise = torch.randn_like(camera_data) * self.cfg.camera_noise_std
+        camera_data = camera_data + noise
+        
+        # 4. Random blur (applied to subset of environments)
+        if self.cfg.camera_blur_probability > 0:
+            blur_mask = torch.rand(self.num_envs, device=self.device) < self.cfg.camera_blur_probability
+            blur_envs = torch.nonzero(blur_mask).squeeze(-1)
+            
+            if len(blur_envs) > 0:
+                for env_id in blur_envs:
+                    kernel_size = random.randint(
+                        self.cfg.camera_blur_kernel_range[0], 
+                        self.cfg.camera_blur_kernel_range[1]
+                    )
+                    # Ensure kernel size is odd
+                    if kernel_size % 2 == 0:
+                        kernel_size += 1
+                    
+                    # Apply Gaussian blur
+                    img = camera_data[env_id].unsqueeze(0).permute(0, 3, 1, 2)  # (1, C, H, W)
+                    blurred = torch.nn.functional.gaussian_blur(
+                        img, kernel_size=(kernel_size, kernel_size)
+                    )
+                    camera_data[env_id] = blurred.permute(0, 2, 3, 1).squeeze(0)
+        
+        # Clamp to valid range
+        camera_data = torch.clamp(camera_data, 0.0, 1.0)
+        
+        return camera_data
+    
     def _get_rewards(self) -> torch.Tensor:
         """Compute and return rewards with detailed logging."""
         # Initialize total rewards
@@ -663,6 +928,11 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Get end-effector position and orientation
         ee_position = self._ee_frame.data.target_pos_w[..., 0, :]
         ee_quat = self._ee_frame.data.target_quat_w[..., 0, :]
+        
+        # ============ NEW: Apply EE observation noise for reward computation ============
+        if self.cfg.enable_domain_randomization:
+            ee_pos_noise = torch.randn_like(ee_position) * self.cfg.ee_pos_noise_std * 0.5
+            ee_position = ee_position + ee_pos_noise
         
         # Transform target pose to world frame
         robot_pos = self._robot.data.root_state_w[:, :3]
@@ -712,158 +982,69 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         )
         rewards += table_penalty
         
-        # 6. Arm avoidance rewards
-        arm_reward = self._compute_arm_avoidance_rewards() * self.cfg.reward_arm_avoidance_weight
-        rewards += arm_reward
+        # 6. Obstacle avoidance rewards
+        obstacle_reward = self._compute_obstacle_avoidance_rewards() * self.cfg.reward_obstacle_avoidance_weight
+        rewards += obstacle_reward
         
-
-        # 7 Success for reaching the end goal and avoiding the arm
-        # Calculate minimum distance from end effector to arm cuboid
-        # Arm dimensions (half-extents for easier calculation)
-        arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)  # [0.5, 0.2, 0.12] / 2
-        arm_position = self._arm.data.root_pos_w[:, :3]
-        arm_quat = self._arm.data.root_quat_w
-
-        min_distances = self._point_to_box_distance(
-            ee_position, 
-            arm_position, 
-            arm_quat, 
-            arm_half_extents
-        )
-        success_mask = (position_error < 0.1) & (min_distances > 0.08)
-        rewards += torch.where(success_mask, 5.0, 0.0)
-
         return rewards
     
-    def _compute_arm_avoidance_rewards(self) -> torch.Tensor:
-        """Compute arm avoidance rewards with dynamic collision risk assessment."""
+    def _compute_obstacle_avoidance_rewards(self) -> torch.Tensor:
+        """Compute obstacle avoidance rewards for the entire arm."""
         rewards = torch.zeros(self.num_envs, device=self.device)
+        safe_distance = 0.2
+        danger_distance = 0.1
+        max_penalty = -10.0
         
-        # Arm dimensions (half-extents for easier calculation)
-        arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)  # [0.5, 0.2, 0.12] / 2
+        # Get obstacle position
+        obstacle_position = self._red_cube.data.root_pos_w[:, :3]
         
-        # Safety parameters - reduced to allow closer approach when needed
-        critical_distance = 0.03  # Very close - high penalty
-        danger_distance = 0.08    # Close - moderate penalty
-        safe_distance = 0.12      # Reduced from 0.15 to allow more flexibility
+        # Body names for UR5 arm
+        arm_body_names = [
+            "base_link", "shoulder_link", "upper_arm_link", "forearm_link",
+            "wrist_1_link", "wrist_2_link", "wrist_3_link", "ee_link"
+        ]
+
+        total_penalty = torch.zeros(self.num_envs, device=self.device)
+
+        # Default weights (higher weight = more important to avoid collision)
+        body_weights = {
+            "base_link": 0.1,      # Base is less likely to hit obstacle
+            "shoulder_link": 0.9,
+            "upper_arm_link": 0.9,
+            "wrist_1_link": 0.5,
+            "wrist_2_link": 0.5,
+            "wrist_3_link": 0.5,
+            "ee_link": 1.0         # End-effector most important
+        }
         
-        # Get arm pose and velocity
-        arm_position = self._arm.data.root_pos_w[:, :3]
-        arm_quat = self._arm.data.root_quat_w
-        arm_velocity = self._arm.data.root_lin_vel_w if hasattr(self._arm.data, 'root_lin_vel_w') else torch.zeros_like(arm_position)
-        
-        # Get end effector position and velocity
-        ee_position = self._ee_frame.data.target_pos_w[..., 0, :]
-        ee_velocity = self._ee_frame.data.target_lin_vel_w[..., 0, :] if hasattr(self._ee_frame.data, 'target_lin_vel_w') else torch.zeros_like(ee_position)
-        
-        # Calculate minimum distance from end effector to arm cuboid
-        min_distances = self._point_to_box_distance(
-            ee_position, 
-            arm_position, 
-            arm_quat, 
-            arm_half_extents
-        )
-        
-        # Calculate relative velocity (positive means moving away from each other)
-        relative_pos = ee_position - arm_position
-        relative_vel = ee_velocity - arm_velocity
-        relative_speed = torch.sum(relative_pos * relative_vel, dim=-1) / (torch.norm(relative_pos, dim=-1) + 1e-6)
-        
-        # Dynamic penalty based on both distance and relative motion
-        for i in range(self.num_envs):
-            distance = min_distances[i]
-            
-            if distance < critical_distance:
-                # Very close - high penalty regardless of motion
-                rewards[i] = -15.0
-            elif distance < danger_distance:
-                # In danger zone - penalty depends on relative motion
-                base_penalty = -8.0 * (1.0 - (distance - critical_distance) / (danger_distance - critical_distance))
+        robot_body_names = self._robot.body_names
+        for body_name in arm_body_names:
+            if body_name in robot_body_names:
+                body_idx = robot_body_names.index(body_name)
+                body_position = self._robot.data.body_pos_w[:, body_idx, :]
+                # Calculate distance between this body part and obstacle
+                distance = torch.norm(body_position - obstacle_position, p=2, dim=-1)
                 
-                # Reduce penalty if moving away from arm
-                if relative_speed[i] > 0:
-                    motion_factor = torch.clamp(relative_speed[i] / 0.5, 0.0, 0.7)  # Max 70% reduction
-                    rewards[i] = base_penalty * (1.0 - motion_factor)
-                else:
-                    # Increase penalty if moving toward arm
-                    motion_factor = torch.clamp(-relative_speed[i] / 0.5, 0.0, 0.5)  # Max 50% increase
-                    rewards[i] = base_penalty * (1.0 + motion_factor)
-            elif distance < safe_distance:
-                # In safe zone - small penalty that decreases with distance
-                base_penalty = -2.0 * (1.0 - (distance - danger_distance) / (safe_distance - danger_distance))
+                # Calculate penalty for this body part
+                body_penalty = torch.zeros_like(distance)
                 
-                # Only apply penalty if moving toward arm
-                if relative_speed[i] < 0:
-                    rewards[i] = base_penalty
-                else:
-                    rewards[i] = 0.0  # No penalty if moving away
-            else:
-                # Outside safe distance - no penalty
-                rewards[i] = 0.0
-        
+                # Apply penalty only when within safe distance
+                within_safe_distance = distance < safe_distance
+                
+                # Exponential penalty that increases as distance decreases
+                normalized_distance = torch.clamp(
+                    (distance - danger_distance) / (safe_distance - danger_distance), 
+                    0.0, 1.0
+                )
+                penalty_magnitude = max_penalty * (1.0 - normalized_distance) ** 2
+                
+                body_penalty = torch.where(within_safe_distance, penalty_magnitude, body_penalty)
+                
+                # Apply body weight and accumulate
+                body_weight = body_weights.get(body_name, 1.0)
+                total_penalty += body_weight * body_penalty
+
         return rewards
-
-    def _point_to_box_distance(self, points: torch.Tensor, box_pos: torch.Tensor, 
-                            box_quat: torch.Tensor, half_extents: torch.Tensor) -> torch.Tensor:
-        """
-        Calculate minimum distance from points to oriented boxes.
-        
-        Args:
-            points: Points to check (N, 3)
-            box_pos: Box center positions (N, 3)
-            box_quat: Box orientations as quaternions (N, 4)
-            half_extents: Box half-extents (3,)
-        
-        Returns:
-            Minimum distances (N,)
-        """
-        # Transform points to box local frame
-        relative_pos = points - box_pos
-        
-        # Convert quaternion to rotation matrix for inverse transform
-        # Using math_utils to handle quaternion operations
-        inv_box_quat = math_utils.quat_inv(box_quat)
-        
-        # Rotate points to box local frame
-        local_points = math_utils.quat_apply(inv_box_quat, relative_pos)
-        
-        # Find closest point on box surface
-        # Clamp to box bounds
-        closest_point_local = torch.clamp(
-            local_points, 
-            -half_extents.unsqueeze(0), 
-            half_extents.unsqueeze(0)
-        )
-        
-        # Check if point is inside the box
-        inside_box = torch.all(
-            torch.abs(local_points) <= half_extents.unsqueeze(0), 
-            dim=-1
-        )
-        
-        # For points inside the box, find distance to nearest face
-        # For points outside, use standard distance
-        distances = torch.zeros(self.num_envs, device=self.device)
-        
-        for i in range(self.num_envs):
-            if inside_box[i]:
-                # Find distance to each face and take minimum
-                distances_to_faces = torch.zeros(6, device=self.device)
-                distances_to_faces[0] = half_extents[0] - local_points[i, 0]  # +X face
-                distances_to_faces[1] = local_points[i, 0] + half_extents[0]  # -X face
-                distances_to_faces[2] = half_extents[1] - local_points[i, 1]  # +Y face
-                distances_to_faces[3] = local_points[i, 1] + half_extents[1]  # -Y face
-                distances_to_faces[4] = half_extents[2] - local_points[i, 2]  # +Z face
-                distances_to_faces[5] = local_points[i, 2] + half_extents[2]  # -Z face
-                
-                # Minimum distance to any face (negative to indicate inside)
-                distances[i] = -torch.min(distances_to_faces)
-            else:
-                # Standard distance calculation for outside points
-                distances[i] = torch.norm(local_points[i] - closest_point_local[i])
-        
-        return distances
-
 
     def _reset_robot_when_stuck_at_table(self):
         """Reset robot to a safe position when it gets stuck at the table."""
@@ -967,29 +1148,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Task success
         task_success = position_success & orientation_success & velocity_success
         
-        # Check if end-effector is outside bounds (early termination)
-        ee_local = ee_position - robot_pos
-        
-
-        # print(f"The local ee coordiantes are: {ee_local}")
-
-        # Check bounds with safety margin
-        x_min = self.cfg.target_ee_bounds["x"][0] - self.cfg.bounds_safety_margin
-        x_max = self.cfg.target_ee_bounds["x"][1] + self.cfg.bounds_safety_margin
-        y_min = self.cfg.target_ee_bounds["y"][0] - self.cfg.bounds_safety_margin
-        y_max = self.cfg.target_ee_bounds["y"][1] + self.cfg.bounds_safety_margin
-        z_min = self.cfg.target_ee_bounds["z"][0] - self.cfg.bounds_safety_margin
-        z_max = self.cfg.target_ee_bounds["z"][1] + self.cfg.bounds_safety_margin
-        
-        outside_bounds = (
-            (ee_local[:, 0] < x_min) | (ee_local[:, 0] > x_max) |
-            (ee_local[:, 1] < y_min) | (ee_local[:, 1] > y_max) |
-            (ee_local[:, 2] < z_min) | (ee_local[:, 2] > z_max)
-        )
-        
-        # Early termination combines time out and bounds violation
-        early_termination = time_out | outside_bounds
-        return task_success, early_termination
+        return task_success, time_out
     
     def _reset_idx(self, env_ids: Sequence[int] | None):
         """Reset specified environments."""
@@ -1012,6 +1171,26 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         if hasattr(self, '_episode_sums'):
             for key in self._episode_sums:
                 self._episode_sums[key][env_ids] = 0.0
+        
+        # ============ NEW: Randomize domain parameters on reset ============
+        self._randomize_domain_parameters(env_ids)
+        
+        # ============ NEW: Randomize action delays ============
+        if self.cfg.enable_domain_randomization:
+            # Randomly assign action delays
+            delay_mask = torch.rand(len(env_ids), device=self.device) < self.cfg.action_delay_probability
+            self._action_delay_steps[env_ids] = torch.where(
+                delay_mask,
+                torch.randint(
+                    self.cfg.action_delay_range[0], 
+                    self.cfg.action_delay_range[1] + 1,
+                    (len(env_ids),), 
+                    device=self.device
+                ),
+                torch.zeros(len(env_ids), device=self.device, dtype=torch.long)
+            )
+            # Clear action delay buffer
+            self._action_delay_buffer[env_ids] = 0.0
         
         # Reset robot joint positions
         num_resets = len(env_ids)
@@ -1041,34 +1220,31 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             env_ids=env_ids
         )
         
-        # Reset arm position and orientation targets
-        for i, env_id in enumerate(env_ids):
-            # Random position within bounds
-            self._arm_target_pos[env_id, 0] = torch.rand(1, device=self.device) * (
-                self.cfg.arm_position_bounds["x"][1] - self.cfg.arm_position_bounds["x"][0]
-            ) + self.cfg.arm_position_bounds["x"][0]
-            
-            self._arm_target_pos[env_id, 1] = torch.rand(1, device=self.device) * (
-                self.cfg.arm_position_bounds["y"][1] - self.cfg.arm_position_bounds["y"][0]
-            ) + self.cfg.arm_position_bounds["y"][0]
-            
-            self._arm_target_pos[env_id, 2] = torch.rand(1, device=self.device) * (
-                self.cfg.arm_position_bounds["z"][1] - self.cfg.arm_position_bounds["z"][0]
-            ) + self.cfg.arm_position_bounds["z"][0]
+        # Reset obstacle position
+        x = torch.rand(num_resets, device=self.device) * (
+            self.cfg.obstacle_reset_bounds["x_max"] - self.cfg.obstacle_reset_bounds["x_min"]
+        ) + self.cfg.obstacle_reset_bounds["x_min"]
         
-        # Set initial arm pose
-        new_positions = self._arm_target_pos[env_ids] + self.scene.env_origins[env_ids, :3]
+        y = torch.rand(num_resets, device=self.device) * (
+            self.cfg.obstacle_reset_bounds["y_max"] - self.cfg.obstacle_reset_bounds["y_min"]
+        ) + self.cfg.obstacle_reset_bounds["y_min"]
         
-        # Keep default orientation (identity quaternion)
-        default_quat = torch.tensor([0.70711, 0.70711, 0.0, 0.0], device=self.device)
-        new_quats = default_quat.unsqueeze(0).repeat(len(env_ids), 1)
+        z = torch.full((num_resets,), self.cfg.obstacle_reset_bounds["z"], device=self.device)
+        
+        # Create position tensor
+        new_positions = torch.stack([x, y, z], dim=-1)
+        new_positions_world = new_positions + self.scene.env_origins[env_ids, :3]
+        
+        # Default orientation
+        default_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+        new_orientations = default_quat.unsqueeze(0).repeat(num_resets, 1)
         
         # Combine position and orientation
-        new_poses = torch.cat([new_positions, new_quats], dim=-1)
+        new_poses = torch.cat([new_positions_world, new_orientations], dim=-1)
         
         # Write to simulation
-        self._arm.write_root_pose_to_sim(new_poses, env_ids=env_ids)
-        self._arm.write_root_velocity_to_sim(
+        self._red_cube.write_root_pose_to_sim(new_poses, env_ids=env_ids)
+        self._red_cube.write_root_velocity_to_sim(
             torch.zeros((num_resets, 6), device=self.device),
             env_ids=env_ids
         )
@@ -1084,6 +1260,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         # Reset timers
         self._command_time_left[env_ids] = self.cfg.command_resampling_time
+        self._obstacle_time[env_ids] = 0.0
         
     def _sample_target_poses_for_reset(self, env_ids: Sequence[int]):
         """Sample new target poses for reset environments."""
@@ -1130,7 +1307,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
                 self.target_pos_visualizer.set_visibility(False)
 
     def _debug_vis_callback(self,event):
-        #update the markers
+        # Update the markers
         robot_pos = self._robot.data.root_state_w[:, :3]
         robot_quat = self._robot.data.root_state_w[:, 3:7]
         

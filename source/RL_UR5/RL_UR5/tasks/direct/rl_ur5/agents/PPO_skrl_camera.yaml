@@ -32,13 +32,13 @@ models:
         input: OBSERVATIONS["state"]  # This will receive the 'state' key from observation dict
         layers: [256, 128, 64]
         activations: [relu, relu, relu]
-        
+
       # Fusion layer combining CNN and MLP outputs
       - name: net
         input: concatenate([camera_features, proprioception])  # Combine features
-        layers: [256, 128, 64]
-        activations: [relu, relu, relu]
-        
+        layers: [128, 64]
+        activations: [relu, relu]
+
     # Output specification
     output: ACTIONS
     
@@ -62,13 +62,13 @@ models:
       - name: proprioception
         input: OBSERVATIONS["state"]  # This will receive the 'state' key from observation dict
         layers: [256, 128, 64]
-        activations: [relu, relu, relu]
+        activations: [ relu, relu, relu]
 
       # Fusion layer
       - name: net
         input: concatenate([camera_features, proprioception]) 
-        layers: [256, 128, 64]
-        activations: [relu, relu, relu]
+        layers: [128, 64]
+        activations: [relu, relu]
 
     # Single value output
     output: ONE
@@ -88,7 +88,7 @@ agent:
   # Core PPO parameters
   discount_factor: 0.99
   lambda: 0.95
-  learning_rate: 5.0e-04  # Slightly lower for stability with images
+  learning_rate: 1.0e-04  # Slightly lower for stability with images
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
     kl_threshold: 0.01
@@ -107,13 +107,13 @@ agent:
   grad_norm_clip: 1.0
   ratio_clip: 0.2
   value_clip: 0.2
+  entropy_loss_scale: 0.1  # Higher for exploration with visual input
   clip_predicted_values: True
-  entropy_loss_scale: 0.05  # Higher for exploration with visual input
   value_loss_scale: 1.0
-  kl_threshold: 0.0
+  kl_threshold: 0.01
   rewards_shaper: 1.0
   time_limit_bootstrap: False
-  mixed_precision: True
+  # mixed_precision: True
   # Experiment tracking
   experiment:
     directory: "./logs/skrl_camera_pose_tracking"
@@ -125,5 +125,5 @@ agent:
 # Sequential trainer configuration
 trainer:
   class: SequentialTrainer
-  timesteps: 70000  # Total training timesteps
+  timesteps: 150000  # Total training timesteps
   environment_info: log
