@@ -9,11 +9,11 @@ from . import agents
 ##
 
 gym.register(
-    id="Isaac-UR5-DirectObjCamera-PPO",
-    entry_point=f"{__name__}.obj_camera_direct:ObjCameraPoseTrackingDirectEnv",
+    id="Isaac-UR5-HuberDirectObj-PPO",
+    entry_point=f"{__name__}.huber_obj_direct:ObjCameraPoseTrackingDirectEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.obj_camera_direct:ObjCameraPoseTrackingDirectEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.huber_obj_direct:ObjCameraPoseTrackingDirectEnvCfg",
         "skrl_cfg_entry_point": f"{agents.__name__}:PPO_skrl_camera.yaml",
     },
 )
@@ -24,6 +24,16 @@ gym.register(
     disable_env_checker=True,
     kwargs={
         "env_cfg_entry_point": f"{__name__}.DR_obj_camera_direct:ObjCameraPoseTrackingDirectEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:PPO_skrl_camera.yaml",
+    },
+)
+
+gym.register(
+    id="Isaac-UR5-DirectObjCamera-PPO",
+    entry_point=f"{__name__}.obj_camera_direct:ObjCameraPoseTrackingDirectEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.obj_camera_direct:ObjCameraPoseTrackingDirectEnvCfg",
         "skrl_cfg_entry_point": f"{agents.__name__}:PPO_skrl_camera.yaml",
     },
 )

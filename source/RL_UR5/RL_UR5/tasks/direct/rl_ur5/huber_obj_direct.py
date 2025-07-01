@@ -26,6 +26,14 @@ from isaaclab.markers import VisualizationMarkers
 from isaaclab.markers.config import FRAME_MARKER_CFG
 import isaaclab.utils.math as math_utils
 from isaaclab.utils.math import sample_uniform
+
+# Visualization imports
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend
+import matplotlib.pyplot as plt
+from matplotlib.patches import Rectangle
+import os
+
 # Robot configuration
 from isaaclab_assets.robots.ur5 import UR5_GRIPPER_CFG
 
@@ -62,7 +70,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     """Configuration for the direct RL environment."""
     
     # Visualization settings - MOVED TO TOP to fix reference issue
-    debug_vis = True  # Enable/disable debug visualization
+    debug_vis = True # Enable/disable debug visualization
     
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
@@ -109,8 +117,8 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.9, 0.0, 0.9), 
-            rot=(0.70711, 0.70711, 0.0, 0.0)
+            pos=(1.0, 0.0, 0.9), 
+            rot=(0.70711, 0.0,0.70711, 0.0)
         ),
     )
 
@@ -180,7 +188,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Basic environment settings
     episode_length_s = 6.0
     decimation = 4
-    action_scale = 0.5  # Reduced for smoother movements
+    action_scale = 0.3  # Reduced for smoother movements
     state_dim = 19
     camera_target_height = 100
     camera_target_width = 120    
@@ -217,31 +225,44 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Viewer settings
     viewer = ViewerCfg(eye=(7.5, 7.5, 7.5), origin_type="world", env_index=0)
     
-    #Progressively increase difficulty(Curriculum learning)
+    # Curriculum learning settings
+    curriculum_enabled = False
+    curriculum_steps = [5000, 10000, 20000, 40000]  # Steps at which to increase difficulty
+    curriculum_arm_speeds = [0.0, 0.1, 0.2, 0.3]  # Progressive arm movement speeds
+    curriculum_target_ranges = [
+        {"x": (0.55, 0.65), "y": (0.45, 0.5), "z": (-0.1, 0.1)},   # Easy
+        {"x": (0.5, 0.7), "y": (0.4, 0.5), "z": (-0.15, 0.15)},    # Medium
+        {"x": (0.5, 0.7), "y": (0.35, 0.55), "z": (-0.2, 0.2)},    # Hard
+        {"x": (0.45, 0.75), "y": (0.3, 0.6), "z": (-0.2, 0.2)},    # Expert
+    ]
+    
+    # Success tracking for adaptive curriculum
+    success_window_size = 100
+    curriculum_advance_threshold = 0.7  # Advance when success rate > 70%
 
     # Command/target pose settings
     target_pose_range = {
         "x": (0.5, 0.7),
-        "y": (0.4, 0.5),
+        "y": (0.45, 0.55),
         "z": (-0.2, 0.2),  # wrt base link of robot [-80mm to +320mm] irl
         "roll": (0.0, 0.0),
         "pitch": (1.57, 1.57),
         "yaw": (0.0, 0.0),
     }
 
-    target_ee_bounds = {
-        "x": (0.35, 0.85),
-        "y": (-0.6, 0.6),
-        "z": (-0.4, 0.4),  # wrt base link of robot [-80mm to +320mm] irl
-    }
+    # target_ee_bounds = {
+    #     "x": (0.35, 0.85),
+    #     "y": (-0.6, 0.6),
+    #     "z": (-0.4, 0.4),  # wrt base link of robot [-80mm to +320mm] irl
+    # }
 
-    command_resampling_time = 3.0
+    command_resampling_time = 6.0
     
     # Human arm movement settings
     arm_position_bounds = {
-        "x": (0.85, 1.0),
-        "y": (-0.45, 0.45),
-        "z": (0.80, 1.0),
+        "x": (2.0, 2.0),
+        "y": (-0.5, 0.5),
+        "z": (0.80, 1.2),
     }
     arm_movement_speed = 0.0  # Speed of random movement
     
@@ -249,28 +270,38 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     reward_distance_weight = -2.0
     reward_distance_tanh_weight = 1.0
     reward_distance_tanh_std = 0.1
-    reward_orientation_weight = -0.2
-    reward_torque_weight = -0.0001
+    reward_orientation_weight = -1.0
+    reward_torque_weight = -0.0001  # Replaced torque with action penalty
     reward_table_collision_weight = -4.0
     reward_arm_avoidance_weight = 10.0  # Changed from obstacle
-    # reward_action_penalty_weight = -0.01
-    # reward_bounds_violation_weight = -20.0  # New penalty for leaving bounds
+    
+    # Artificial Potential Field parameters
+    apf_critical_distance = 0.15  # db - critical distance for obstacle avoidance
+    apf_smoothness = 0.1  # ko - smoothness parameter for beta transition
+    energy_reward_weight = -1.0  # Weight for energy component
+    
+    # Huber loss parameters
+    huber_delta = 0.05  # Delta parameter for Huber loss
     
     # Action filter settings
     action_filter_order = 2
-    action_filter_cutoff_freq = 2.0
+    action_filter_cutoff_freq = 8.0
     action_filter_damping_ratio = 0.707
     
     # Termination settings
-    position_threshold = 0.01
+    position_threshold = 0.03
     orientation_threshold = 0.05
     velocity_threshold = 0.05
     torque_threshold = 1.0
     bounds_safety_margin = 0.1  # 0.1m margin for bounds checking
     
     # Camera preprocessing settings
-    camera_crop_top = 30
-    camera_crop_bottom = 10
+    camera_crop_top = 80
+    camera_crop_bottom = 20
+    
+    # Visualization settings
+    visualize_camera_interval = 10000  # Visualize camera every N steps
+    visualization_save_path = "/home/adi2440/Desktop/camera_obs/"  # Path to save visualizations
 
     
     # Noise settings
@@ -327,11 +358,20 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Initialize action filter
         self._setup_action_filter()
         
+        # Curriculum learning state
+        self._curriculum_level = 0
+        self._success_buffer = torch.zeros(self.cfg.success_window_size, device=self.device)
+        self._success_buffer_idx = 0
+        
+        # Apply initial curriculum settings
+        self._update_curriculum_settings()
+        
         # Performance tracking
         self._episode_sums = {
             "position_error": torch.zeros(self.num_envs, device=self.device),
             "total_reward": torch.zeros(self.num_envs, device=self.device),
             "success_count": torch.zeros(self.num_envs, device=self.device),
+            "min_arm_distance": torch.ones(self.num_envs, device=self.device) * float('inf'),
         }
         
         # Log initial information
@@ -346,6 +386,13 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         # Setup debug visualization if enabled
         self.set_debug_vis(self.cfg.debug_vis)
+        
+        # Create visualization directory
+        if not os.path.exists(self.cfg.visualization_save_path):
+            os.makedirs(self.cfg.visualization_save_path)
+        
+        # Initialize visualization counter
+        self._vis_counter = 0
 
 
     def close(self):
@@ -414,7 +461,46 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             self._filter_b2 = a1 / a3
             self._filter_a1 = (2.0 * a1 - 2.0) / a3
             self._filter_a2 = (a1 - a2 + 1.0) / a3
+    
+    def _update_curriculum_settings(self):
+        """Update environment settings based on curriculum level."""
+        if not self.cfg.curriculum_enabled:
+            return
             
+        level = self._curriculum_level
+        
+        # Update arm movement speed
+        if level < len(self.cfg.curriculum_arm_speeds):
+            self.cfg.arm_movement_speed = self.cfg.curriculum_arm_speeds[level]
+        
+        # Update target pose ranges
+        if level < len(self.cfg.curriculum_target_ranges):
+            self.cfg.target_pose_range.update(self.cfg.curriculum_target_ranges[level])
+        
+        print(f"[CURRICULUM] Level {level}: arm_speed={self.cfg.arm_movement_speed:.2f}, "
+              f"target_x={self.cfg.target_pose_range['x']}, "
+              f"target_y={self.cfg.target_pose_range['y']}")
+    
+    def _check_curriculum_advancement(self):
+        """Check if curriculum should advance based on success rate."""
+        if not self.cfg.curriculum_enabled:
+            return
+            
+        # Calculate current success rate
+        success_rate = self._success_buffer.mean().item()
+        
+        # Check if we should advance
+        if success_rate > self.cfg.curriculum_advance_threshold:
+            if self._curriculum_level < len(self.cfg.curriculum_steps) - 1:
+                # Check if we've reached the step threshold
+                step_threshold = self.cfg.curriculum_steps[self._curriculum_level + 1]
+                if self.common_step_counter >= step_threshold:
+                    self._curriculum_level += 1
+                    self._update_curriculum_settings()
+                    # Reset success buffer for new level
+                    self._success_buffer.zero_()
+                    print(f"[CURRICULUM] Advanced to level {self._curriculum_level} at step {self.common_step_counter}")
+    
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         """Apply actions before physics step."""
         # Store raw actions
@@ -439,6 +525,9 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             # reset their countdown
             self._command_time_left[expired_mask] = self.cfg.command_resampling_time
         
+        # Check curriculum advancement
+        self._check_curriculum_advancement()
+        
         #IF robot is stuck at the table, reset it
         self._reset_robot_when_stuck_at_table()
 
@@ -447,9 +536,26 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
 
         
     def _apply_action(self) -> None:
-        """Apply the processed actions to the robot."""
-        # Add actions to current positions 
-        self._robot_dof_targets = self.actions
+        """Apply the processed actions to the robot with safety checks."""
+        # Get current joint positions
+        current_joint_pos = self._robot.data.joint_pos[:, self._joint_indices]
+        
+        # Add actions to current positions for position control
+        self._robot_dof_targets = current_joint_pos + self.actions
+        
+        # Clamp to joint limits with safety margin
+        safety_margin = 0.05  # radians
+        self._robot_dof_targets = torch.clamp(
+            self._robot_dof_targets,
+            self._robot_dof_lower_limits + safety_margin,
+            self._robot_dof_upper_limits - safety_margin
+        )
+        
+        # Apply velocity limits for safety
+        max_velocity = 1.5  # rad/s
+        velocity_command = (self._robot_dof_targets - current_joint_pos) / self.physics_dt
+        velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
+        self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
         
         # Set joint position targets
         self._robot.set_joint_position_target(
@@ -528,51 +634,89 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             print(f"[DEBUG] New target for env 0: pos=[{x[idx].item():.3f}, {y[idx].item():.3f}, {z[idx].item():.3f}]")
 
     def _update_arm_position(self):
-        """Update the human arm position with random movement."""
+        """Update the human arm position with simple linear motion pattern."""
+        # Initialize motion parameters if not exists
+        if not hasattr(self, '_arm_motion_time'):
+            self._arm_motion_time = torch.zeros(self.num_envs, device=self.device)
+            self._arm_motion_pattern = torch.randint(0, 3, (self.num_envs,), device=self.device)  # 0: X-axis, 1: Y-axis, 2: diagonal
+        
         # Get current arm positions and orientations
         arm_positions = self._arm.data.root_pos_w.clone()
         arm_quats = self._arm.data.root_quat_w.clone()
         
+        # Update motion time
+        self._arm_motion_time += self.physics_dt
+        
         for i in range(self.num_envs):
-            # Update target positions with random walk
-            # Position random walk
-            pos_noise = (torch.rand(3, device=self.device) - 0.5) * 2.0 * self.cfg.arm_movement_speed * self.physics_dt
-            self._arm_target_pos[i] += pos_noise
+            # Calculate base position (center of motion range)
+            base_x = (self.cfg.arm_position_bounds["x"][0] + self.cfg.arm_position_bounds["x"][1]) / 2
+            base_y = (self.cfg.arm_position_bounds["y"][0] + self.cfg.arm_position_bounds["y"][1]) / 2
+            base_z = (self.cfg.arm_position_bounds["z"][0] + self.cfg.arm_position_bounds["z"][1]) / 2
             
-            # Clamp to bounds
-            self._arm_target_pos[i, 0] = torch.clamp(
-                self._arm_target_pos[i, 0],
-                self.cfg.arm_position_bounds["x"][0],
-                self.cfg.arm_position_bounds["x"][1]
-            )
-            self._arm_target_pos[i, 1] = torch.clamp(
-                self._arm_target_pos[i, 1],
-                self.cfg.arm_position_bounds["y"][0],
-                self.cfg.arm_position_bounds["y"][1]
-            )
-            self._arm_target_pos[i, 2] = torch.clamp(
-                self._arm_target_pos[i, 2],
-                self.cfg.arm_position_bounds["z"][0],
-                self.cfg.arm_position_bounds["z"][1]
-            )
+            # Calculate motion amplitudes
+            amp_x = (self.cfg.arm_position_bounds["x"][1] - self.cfg.arm_position_bounds["x"][0]) / 2 * 0.8
+            amp_y = (self.cfg.arm_position_bounds["y"][1] - self.cfg.arm_position_bounds["y"][0]) / 2 * 0.8
+            amp_z = (self.cfg.arm_position_bounds["z"][1] - self.cfg.arm_position_bounds["z"][0]) / 2 * 0.8
             
-            # Smooth movement towards target
-            alpha_pos = 0.1  # Position smoothing factor
+            # Linear motion with triangle wave (back and forth)
+            # Period of 4 seconds for complete back-and-forth motion
+            period = 8.0
+            phase = (self._arm_motion_time[i] % period) / period
+            
+            # Triangle wave: 0->1->0
+            if phase < 0.5:
+                motion_factor = phase * 2.0
+            else:
+                motion_factor = 2.0 - phase * 2.0
+            
+            # Apply motion pattern
+            if self._arm_motion_pattern[i] == 0:  # X-axis motion
+                new_x = base_x + (motion_factor - 0.5) * 2 * amp_x
+                new_y = base_y
+                new_z = base_z
+            elif self._arm_motion_pattern[i] == 1:  # Y-axis motion
+                new_x = base_x
+                new_y = base_y + (motion_factor - 0.5) * 2 * amp_y
+                new_z = base_z
+            else:  # Diagonal motion (X-Y plane)
+                new_x = base_x + (motion_factor - 0.5) * 2 * amp_x * 0.7
+                new_y = base_y + (motion_factor - 0.5) * 2 * amp_y * 0.7
+                new_z = base_z
             
             # Update position in world frame
-            local_pos = arm_positions[i, :3] - self.scene.env_origins[i, :3]
-            new_local_pos = (1 - alpha_pos) * local_pos + alpha_pos * self._arm_target_pos[i]
-            arm_positions[i, :3] = new_local_pos + self.scene.env_origins[i, :3]
+            local_pos = torch.tensor([new_x, new_y, new_z], device=self.device)
+            arm_positions[i, :3] = local_pos + self.scene.env_origins[i, :3]
         
         # Apply new poses (keep original orientation)
         self._arm.write_root_pose_to_sim(
             torch.cat([arm_positions, arm_quats], dim=-1)
         )
         
-        # Reset velocities for smooth motion
-        self._arm.write_root_velocity_to_sim(
-            torch.zeros((self.num_envs, 6), device=self.device)
-        )
+        # Calculate and set velocities for smooth physics
+        if self.cfg.arm_movement_speed > 0:
+            velocities = torch.zeros((self.num_envs, 6), device=self.device)
+            
+            for i in range(self.num_envs):
+                # Calculate velocity based on motion pattern and phase
+                period = 4.0
+                phase = (self._arm_motion_time[i] % period) / period
+                
+                # Velocity direction changes at phase 0.5
+                direction = 1.0 if phase < 0.5 else -1.0
+                
+                if self._arm_motion_pattern[i] == 0:  # X-axis
+                    velocities[i, 0] = direction * self.cfg.arm_movement_speed
+                elif self._arm_motion_pattern[i] == 1:  # Y-axis
+                    velocities[i, 1] = direction * self.cfg.arm_movement_speed
+                else:  # Diagonal
+                    velocities[i, 0] = direction * self.cfg.arm_movement_speed * 0.7
+                    velocities[i, 1] = direction * self.cfg.arm_movement_speed * 0.7
+            
+            self._arm.write_root_velocity_to_sim(velocities)
+        else:
+            self._arm.write_root_velocity_to_sim(
+                torch.zeros((self.num_envs, 6), device=self.device)
+            )
         
     def _get_observations(self) -> dict:
         """Compute and return observations as a dictionary."""
@@ -621,10 +765,75 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         return state_obs
     
+    def _visualize_camera_observation(self, raw_image: torch.Tensor, processed_image: torch.Tensor, env_id: int = 0):
+        """Visualize raw and processed camera observations for debugging."""
+        # Create figure with subplots
+        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+        
+        # Get data for specified environment
+        raw_env = raw_image[env_id].cpu().numpy()
+        processed_env = processed_image[env_id].cpu().numpy()
+        
+        # Raw image
+        axes[0].imshow(raw_env)
+        axes[0].set_title(f'Raw Camera Image (224x224)\nEnv {env_id}')
+        axes[0].axis('off')
+        
+        # Add crop region visualization on raw image
+        crop_rect = Rectangle((0, self.cfg.camera_crop_top), 224, 
+                            224 - self.cfg.camera_crop_top - self.cfg.camera_crop_bottom,
+                            linewidth=2, edgecolor='red', facecolor='none')
+        axes[0].add_patch(crop_rect)
+        axes[0].text(5, self.cfg.camera_crop_top - 5, 'Crop Region', color='red', fontsize=10)
+        
+        # Processed image (CHW to HWC for visualization)
+        processed_vis = processed_env.transpose(1, 2, 0)
+        
+        # Show normalized image
+        axes[1].imshow(processed_vis + 0.5)  # Add 0.5 since we subtracted mean
+        axes[1].set_title(f'Processed & Resized\n({self.cfg.camera_target_height}x{self.cfg.camera_target_width})')
+        axes[1].axis('off')
+        
+        # Show channel statistics
+        axes[2].axis('off')
+        stats_text = f"Processed Image Statistics (Env {env_id}):\n\n"
+        stats_text += f"Shape: {processed_env.shape}\n"
+        stats_text += f"Min value: {processed_env.min():.3f}\n"
+        stats_text += f"Max value: {processed_env.max():.3f}\n"
+        stats_text += f"Mean value: {processed_env.mean():.3f}\n"
+        stats_text += f"Std value: {processed_env.std():.3f}\n\n"
+        
+        # Add current state info
+        ee_pos = self._ee_frame.data.target_pos_w[env_id, 0, :].cpu().numpy()
+        target_pos = self._target_poses[env_id, :3].cpu().numpy()
+        arm_pos = self._arm.data.root_pos_w[env_id, :3].cpu().numpy()
+        
+        stats_text += f"End-effector pos: [{ee_pos[0]:.3f}, {ee_pos[1]:.3f}, {ee_pos[2]:.3f}]\n"
+        stats_text += f"Target pos: [{target_pos[0]:.3f}, {target_pos[1]:.3f}, {target_pos[2]:.3f}]\n"
+        stats_text += f"Arm obstacle pos: [{arm_pos[0]:.3f}, {arm_pos[1]:.3f}, {arm_pos[2]:.3f}]\n"
+        
+        axes[2].text(0.1, 0.5, stats_text, transform=axes[2].transAxes, 
+                    fontsize=11, verticalalignment='center', family='monospace')
+        
+        plt.tight_layout()
+        
+        # Save figure
+        filename = f"{self.cfg.visualization_save_path}/camera_obs_step_{self.common_step_counter:06d}.png"
+        plt.savefig(filename, dpi=100, bbox_inches='tight')
+        plt.close()
+        
+        if self._vis_counter % 10 == 0:  # Log every 10th visualization
+            print(f"[VIS] Saved camera observation to: {filename}")
+        
+        self._vis_counter += 1
+    
     def _get_camera_observations(self) -> torch.Tensor:
         """Get and preprocess camera observations."""
         # Get camera data
         camera_data = self._tiled_camera.data.output["rgb"] / 255.0  # Shape: (num_envs, H, W, C)
+        
+        # Store raw image for visualization
+        raw_camera_data = camera_data.clone()
         
         # Mean subtraction for normalization
         mean_tensor = torch.mean(camera_data, dim=(1, 2), keepdim=True)
@@ -649,12 +858,40 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             mode='bilinear',
             align_corners=False
         )
+
+        # Visualize camera observation periodically
+        if self.common_step_counter % self.cfg.visualize_camera_interval == 0:
+            self._visualize_camera_observation(raw_camera_data, resized, env_id=0)
         
         return resized
     
+    def _huber_loss(self, x: torch.Tensor, delta: float) -> torch.Tensor:
+        """Compute Huber loss for robust distance penalty."""
+        abs_x = torch.abs(x)
+        return torch.where(
+            abs_x <= delta,
+            0.5 * x * x,
+            delta * (abs_x - 0.5 * delta)
+        )
+    
+    def _compute_beta_transition(self, min_distances: torch.Tensor) -> torch.Tensor:
+        """Compute smooth transition factor β for adaptive reward mixing."""
+        x = (min_distances - self.cfg.apf_critical_distance) / self.cfg.apf_smoothness
+        beta = (torch.tanh(x) + 1.0) / 2.0
+        return beta
+    
+    def _compute_energy_reward(self) -> torch.Tensor:
+        """Compute energy-based reward from joint velocities."""
+        joint_velocities = self._robot.data.joint_vel[:, self._joint_indices]
+        # Compute norm squared for each joint
+        velocity_norms_squared = joint_velocities ** 2
+        # Sum tanh over all 6 joints for each environment
+        energy_reward = -torch.sum(torch.tanh(velocity_norms_squared), dim=1)
+        return energy_reward
+    
     def _get_rewards(self) -> torch.Tensor:
-        """Compute and return rewards with detailed logging."""
-        # Initialize total rewards
+        """Compute rewards using Artificial Potential Field approach with Huber loss."""
+        # Initialize rewards
         rewards = torch.zeros(self.num_envs, device=self.device)
         
         # Get end-effector position and orientation
@@ -673,20 +910,40 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         )
         des_quat_w = math_utils.quat_mul(robot_quat, des_quat_b)
         
-        # 1. Position tracking reward
-        position_error = torch.norm(ee_position - des_pos_w, dim=-1)
-        position_reward = self.cfg.reward_distance_weight * position_error
-        rewards += position_reward
+        # Calculate distances to arm obstacle
+        arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)
+        arm_position = self._arm.data.root_pos_w[:, :3]
+        arm_quat = self._arm.data.root_quat_w
         
-        # 2. Position tracking tanh reward
+        min_distances_to_arm = self._point_to_box_distance(
+            ee_position, 
+            arm_position, 
+            arm_quat, 
+            arm_half_extents
+        )
+        
+        # Compute β transition factor for APF
+        beta = self._compute_beta_transition(min_distances_to_arm)
+        
+        # === Traditional Rewards (Rt) ===
+        traditional_rewards = torch.zeros_like(rewards)
+        
+        # 1. Position tracking with Huber loss
+        position_error = torch.norm(ee_position - des_pos_w, dim=-1)
+        position_huber_loss = self._huber_loss(position_error, self.cfg.huber_delta)
+        position_reward = self.cfg.reward_distance_weight * position_huber_loss
+        traditional_rewards += position_reward
+        
+        # 2. Position tracking tanh reward (smooth near goal)
         position_reward_tanh = 1.0 - torch.tanh(position_error / self.cfg.reward_distance_tanh_std)
         position_reward_tanh_scaled = self.cfg.reward_distance_tanh_weight * position_reward_tanh
-        rewards += position_reward_tanh_scaled
+        traditional_rewards += position_reward_tanh_scaled
         
-        # 3. Orientation tracking reward
+        # 3. Orientation tracking reward with Huber loss
         orientation_error = math_utils.quat_error_magnitude(ee_quat, des_quat_w)
-        orientation_reward = self.cfg.reward_orientation_weight * orientation_error
-        rewards += orientation_reward
+        orientation_huber_loss = self._huber_loss(orientation_error, self.cfg.huber_delta * 0.5)  # Smaller delta for orientation
+        orientation_reward = self.cfg.reward_orientation_weight * orientation_huber_loss
+        traditional_rewards += orientation_reward
         
         # 4. Joint torque penalty
         if hasattr(self._robot.data, 'applied_torque') and self._robot.data.applied_torque is not None:
@@ -707,29 +964,54 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             torch.ones_like(ee_height) * self.cfg.reward_table_collision_weight,
             torch.zeros_like(ee_height)
         )
-        rewards += table_penalty
+        traditional_rewards += table_penalty
         
-        # 6. Arm avoidance rewards
+        # 6. Arm avoidance rewards (part of traditional rewards)
         arm_reward = self._compute_arm_avoidance_rewards() * self.cfg.reward_arm_avoidance_weight
-        rewards += arm_reward
+        traditional_rewards += arm_reward
         
-
-        # 7 Success for reaching the end goal and avoiding the arm
-        # Calculate minimum distance from end effector to arm cuboid
-        # Arm dimensions (half-extents for easier calculation)
-        # arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)  # [0.5, 0.2, 0.12] / 2
-        # arm_position = self._arm.data.root_pos_w[:, :3]
-        # arm_quat = self._arm.data.root_quat_w
-
-        # min_distances = self._point_to_box_distance(
-        #     ee_position, 
-        #     arm_position, 
-        #     arm_quat, 
-        #     arm_half_extents
-        # )
-        # success_mask = (position_error < 0.05) & (min_distances > 0.08)
-        # rewards += torch.where(success_mask, 5.0, 0.0)
-
+        # === Energy-based Rewards (Renergy) ===
+        energy_rewards = self._compute_energy_reward() * self.cfg.energy_reward_weight
+        
+        # === Adaptive Combination using APF ===
+        # Rada = β · Rt + (1 − β) · Renergy
+        rewards = beta * traditional_rewards + (1.0 - beta) * energy_rewards
+        
+        # Track reward components for logging
+        if hasattr(self, '_episode_sums'):
+            self._episode_sums["total_reward"] += rewards
+            self._episode_sums["position_error"] += position_error
+            self._episode_sums["min_arm_distance"] = torch.minimum(
+                self._episode_sums["min_arm_distance"], min_distances_to_arm
+            )
+            
+            # Check for success
+            success_mask = (position_error < 0.05) & (min_distances_to_arm > 0.08)
+            self._episode_sums["success_count"] += success_mask.float()
+            
+            # Update success buffer for curriculum learning
+            if torch.any(success_mask):
+                success_rate = success_mask.float().mean()
+                self._success_buffer[self._success_buffer_idx] = success_rate
+                self._success_buffer_idx = (self._success_buffer_idx + 1) % self.cfg.success_window_size
+        
+        # Log detailed reward breakdown for first environment occasionally
+        if self.common_step_counter % 500 == 0 and self.num_envs > 0:
+            env_0_data = {
+                "position_error": position_error[0].item(),
+                "position_huber": position_huber_loss[0].item(),
+                "orientation_error": orientation_error[0].item(),
+                # "action_penalty": torque_penalty[0].item(),
+                "min_dist_to_arm": min_distances_to_arm[0].item(),
+                "beta": beta[0].item(),
+                "energy_reward": energy_rewards[0].item(),
+                "total_reward": rewards[0].item()
+            }
+            # print(f"[REWARD] Env 0 - Beta: {env_0_data['beta']:.3f}, "
+            #       f"Dist to arm: {env_0_data['min_dist_to_arm']:.3f}, "
+            #       f"Energy: {env_0_data['energy_reward']:.3f}, "
+            #       f"Total: {env_0_data['total_reward']:.3f}")
+        
         return rewards
     
     def _compute_arm_avoidance_rewards(self) -> torch.Tensor:
@@ -981,10 +1263,13 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             avg_position_error = self._episode_sums["position_error"][env_ids].mean().item()
             avg_reward = self._episode_sums["total_reward"][env_ids].mean().item()
             success_rate = self._episode_sums["success_count"][env_ids].mean().item()
+            min_arm_dist = self._episode_sums["min_arm_distance"][env_ids].mean().item()
             
             if self.common_step_counter % 1000 == 0:  # Log every 1000 steps
-                print(f"[INFO] Episode complete - Avg position error: {avg_position_error:.4f}, "
-                      f"Avg reward: {avg_reward:.2f}, Success rate: {success_rate:.2f}")
+                print(f"[INFO] Episode stats - Pos error: {avg_position_error:.4f}, "
+                      f"Reward: {avg_reward:.2f}, Success: {success_rate:.2f}, "
+                      f"Min arm dist: {min_arm_dist:.3f}, "
+                      f"Curriculum: L{self._curriculum_level}")
         
         # Reset episode tracking
         if hasattr(self, '_episode_sums'):
@@ -1038,7 +1323,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         new_positions = self._arm_target_pos[env_ids] + self.scene.env_origins[env_ids, :3]
         
         # Keep default orientation (identity quaternion)
-        default_quat = torch.tensor([0.70711, 0.70711, 0.0, 0.0], device=self.device)
+        default_quat = torch.tensor([0.0, 1.0, 0.0,0.0], device=self.device)
         new_quats = default_quat.unsqueeze(0).repeat(len(env_ids), 1)
         
         # Combine position and orientation
@@ -1107,24 +1392,51 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             if hasattr(self, "target_pos_visualizer"):
                 self.target_pos_visualizer.set_visibility(False)
 
-    def _debug_vis_callback(self,event):
-        #update the markers
+    def _debug_vis_callback(self, event):
+        """Update debug visualization markers."""
+        # Update target pose markers
         robot_pos = self._robot.data.root_state_w[:, :3]
         robot_quat = self._robot.data.root_state_w[:, 3:7]
         
-        des_pos_b = self._target_poses[:, :3]  # Extract position only
+        des_pos_b = self._target_poses[:, :3]
+        des_quat_b = self._target_poses[:, 3:7]
         
         # Transform to world frame
         des_pos_w, _ = math_utils.combine_frame_transforms(
             robot_pos, robot_quat, des_pos_b
         )
-        
-        # Convert orientations to quaternions
-        des_quat_b = self._target_poses[:, 3:7]
         des_quat_w = math_utils.quat_mul(robot_quat, des_quat_b)
-
-        # Visualize the world positions
+        
+        # Visualize the target positions
         self.target_pos_visualizer.visualize(translations=des_pos_w, orientations=des_quat_w)
+        
+        # Additionally log APF beta values for first few environments
+        if self.common_step_counter % 10 == 0:  # Every 100 steps
+
+            # Calculate current beta values
+            ee_position = self._ee_frame.data.target_pos_w[..., 0, :]
+            arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)
+            arm_position = self._arm.data.root_pos_w[:, :3]
+            arm_quat = self._arm.data.root_quat_w
+            
+            min_distances = self._point_to_box_distance(
+                ee_position, arm_position, arm_quat, arm_half_extents
+            )
+            beta_values = self._compute_beta_transition(min_distances)
+
+            joint_vel = self._robot.data.joint_vel[:, self._joint_indices]
+            max_velocity = 1.5  # rad/s
+            current_joint_pos = self._robot.data.joint_pos[:, self._joint_indices]
+            velocity_command = (self._robot_dof_targets - current_joint_pos) / self.physics_dt
+            velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
+            self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
+
+            # Log for first 3 environments
+            for i in range(min(3, self.num_envs)):
+                print(f"[APF] Env {i}: dist={min_distances[i]:.3f}m, β={beta_values[i]:.3f}")
+                print(f"Joint Velocities sent as observation to Env{i}: vel {joint_vel}")
+                print(f"Joint Velocities command added to action to Env{i}: vel {velocity_command}")
+                print(f"Action Target sent to robot Env{i}: action {self._robot_dof_targets}")
 
 
 # Factory function for creating the environment
