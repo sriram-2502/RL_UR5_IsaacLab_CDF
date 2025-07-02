@@ -9,6 +9,9 @@ from __future__ import annotations
 import torch
 import numpy as np
 import math
+import csv
+import os
+from datetime import datetime
 import random
 from typing import Dict, Any, Tuple, Optional, Sequence
 import gymnasium as gym
@@ -70,7 +73,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     """Configuration for the direct RL environment."""
     
     # Visualization settings - MOVED TO TOP to fix reference issue
-    debug_vis = True # Enable/disable debug visualization
+    debug_vis = False # Enable/disable debug visualization
     
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
@@ -189,7 +192,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     episode_length_s = 6.0
     decimation = 4
     action_scale = 0.3  # Reduced for smoother movements
-    state_dim = 19
+    state_dim = 13
     camera_target_height = 100
     camera_target_width = 120    
 
@@ -260,20 +263,20 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Human arm movement settings
     arm_position_bounds = {
-        "x": (2.0, 2.0),
+        "x": (0.80, 1.2),
         "y": (-0.5, 0.5),
         "z": (0.80, 1.2),
     }
-    arm_movement_speed = 0.0  # Speed of random movement
+    arm_movement_speed = 0.4  # Speed of random movement
     
     # Reward settings
-    reward_distance_weight = -2.0
-    reward_distance_tanh_weight = 1.0
+    reward_distance_weight = -2.5
+    reward_distance_tanh_weight = 1.5
     reward_distance_tanh_std = 0.1
-    reward_orientation_weight = -1.0
+    reward_orientation_weight = -0.2
     reward_torque_weight = -0.0001  # Replaced torque with action penalty
     reward_table_collision_weight = -4.0
-    reward_arm_avoidance_weight = 10.0  # Changed from obstacle
+    reward_arm_avoidance_weight = 7.0  # Changed from obstacle
     
     # Artificial Potential Field parameters
     apf_critical_distance = 0.15  # db - critical distance for obstacle avoidance
@@ -281,15 +284,15 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     energy_reward_weight = -1.0  # Weight for energy component
     
     # Huber loss parameters
-    huber_delta = 0.05  # Delta parameter for Huber loss
+    huber_delta = 0.08  # Delta parameter for Huber loss
     
     # Action filter settings
     action_filter_order = 2
-    action_filter_cutoff_freq = 8.0
+    action_filter_cutoff_freq = 3.0
     action_filter_damping_ratio = 0.707
     
     # Termination settings
-    position_threshold = 0.03
+    position_threshold = 0.01
     orientation_threshold = 0.05
     velocity_threshold = 0.05
     torque_threshold = 1.0
@@ -305,14 +308,14 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
 
     
     # Noise settings
-    joint_pos_noise_min = -0.01
-    joint_pos_noise_max = 0.01
+    joint_pos_noise_min = -0.05
+    joint_pos_noise_max = 0.05
     joint_vel_noise_min = -0.001
     joint_vel_noise_max = 0.001
     
     # Reset settings
     robot_base_pose = [-0.568, -0.858,  1.402, -2.185, -1.6060665,  1.64142667]
-    robot_reset_noise_range = 0.01
+    robot_reset_noise_range = 0.05
 
 
 class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
@@ -323,7 +326,14 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
     def __init__(self, cfg: ObjCameraPoseTrackingDirectEnvCfg, render_mode: str | None = None, **kwargs):
         # Store config
         self.cfg = cfg
-        
+
+        # === episode / logging bookkeeping ===
+        self._episode_counter = 0
+
+        # file handles, writers, directories (initialized on first save)
+        self._state_obs_file    = None
+        self._state_csv_writer  = None
+        self._image_obs_dir     = None
         # Initialize parent
         super().__init__(cfg, render_mode, **kwargs)
         
@@ -660,7 +670,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             
             # Linear motion with triangle wave (back and forth)
             # Period of 4 seconds for complete back-and-forth motion
-            period = 8.0
+            period = 6.0
             phase = (self._arm_motion_time[i] % period) / period
             
             # Triangle wave: 0->1->0
@@ -744,14 +754,14 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             joint_pos_noisy = joint_pos
         
         # Get joint velocities with noise
-        joint_vel = self._robot.data.joint_vel[:, self._joint_indices]
-        if self.cfg.joint_vel_noise_max > 0:
-            joint_vel_noise = torch.rand_like(joint_vel) * (
-                self.cfg.joint_vel_noise_max - self.cfg.joint_vel_noise_min
-            ) + self.cfg.joint_vel_noise_min
-            joint_vel_noisy = joint_vel + joint_vel_noise
-        else:
-            joint_vel_noisy = joint_vel
+        # joint_vel = self._robot.data.joint_vel[:, self._joint_indices]
+        # if self.cfg.joint_vel_noise_max > 0:
+        #     joint_vel_noise = torch.rand_like(joint_vel) * (
+        #         self.cfg.joint_vel_noise_max - self.cfg.joint_vel_noise_min
+        #     ) + self.cfg.joint_vel_noise_min
+        #     joint_vel_noisy = joint_vel + joint_vel_noise
+        # else:
+        #     joint_vel_noisy = joint_vel
         
         # Get target pose (already in robot base frame)
         target_pose = self._target_poses
@@ -759,7 +769,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Concatenate all state observations
         state_obs = torch.cat([
             joint_pos_noisy,      # 6 dims
-            joint_vel_noisy,      # 6 dims
+            # joint_vel_noisy,      # 6 dims
             target_pose,          # 7 dims
         ], dim=-1)
         
@@ -969,6 +979,24 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # 6. Arm avoidance rewards (part of traditional rewards)
         arm_reward = self._compute_arm_avoidance_rewards() * self.cfg.reward_arm_avoidance_weight
         traditional_rewards += arm_reward
+
+        # 7 Success for reaching the end goal and avoiding the arm
+        # Calculate minimum distance from end effector to arm cuboid
+        # Arm dimensions (half-extents for easier calculation)
+        arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)  # [0.5, 0.2, 0.12] / 2
+        arm_position = self._arm.data.root_pos_w[:, :3]
+        arm_quat = self._arm.data.root_quat_w
+
+        min_distances = self._point_to_box_distance(
+            ee_position, 
+            arm_position, 
+            arm_quat, 
+            arm_half_extents
+        )
+        joint_velocities = torch.norm(self._robot.data.joint_vel, p=2, dim=-1)
+
+        success_mask = (position_error < 0.05) & (min_distances > 0.08) & (joint_velocities < self.cfg.velocity_threshold)
+        traditional_rewards += torch.where(success_mask, 5.0, 0.0)
         
         # === Energy-based Rewards (Renergy) ===
         energy_rewards = self._compute_energy_reward() * self.cfg.energy_reward_weight
@@ -1255,9 +1283,13 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         """Reset specified environments."""
         if env_ids is None:
             env_ids = self._robot._ALL_INDICES
-            
+
+        self._mark_episode_end()
+
         super()._reset_idx(env_ids)
         
+        self._mark_episode_start()
+
         # Print episode statistics for completed environments
         if len(env_ids) > 0 and hasattr(self, '_episode_sums'):
             avg_position_error = self._episode_sums["position_error"][env_ids].mean().item()
@@ -1392,8 +1424,100 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             if hasattr(self, "target_pos_visualizer"):
                 self.target_pos_visualizer.set_visibility(False)
 
+
+    # -------------------------------------------------------------------------
+    # 1) MARK EPISODE BOUNDARIES
+    # -------------------------------------------------------------------------
+    def _mark_episode_start(self):
+        """Write a comment line to each CSV and bump episode counter."""
+        self._episode_counter += 1
+        step = self.common_step_counter
+
+        # joint-target CSV
+        if hasattr(self, "_joint_targets_file"):
+            self._joint_targets_file.write(
+                f"# --- EPISODE {self._episode_counter} START at step {step} ---\n"
+            )
+            self._joint_targets_file.flush()
+
+        # state-observation CSV
+        if self._state_obs_file:
+            self._state_obs_file.write(
+                f"# --- EPISODE {self._episode_counter} START at step {step} ---\n"
+            )
+            self._state_obs_file.flush()
+
+    def _mark_episode_end(self):
+        """Write a comment line to each CSV at episode end."""
+        step = self.common_step_counter
+
+        if hasattr(self, "_joint_targets_file"):
+            self._joint_targets_file.write(
+                f"# --- EPISODE {self._episode_counter}  END  at step {step} ---\n"
+            )
+            self._joint_targets_file.flush()
+
+        if self._state_obs_file:
+            self._state_obs_file.write(
+                f"# --- EPISODE {self._episode_counter}  END  at step {step} ---\n"
+            )
+            self._state_obs_file.flush()
+
+    # -------------------------------------------------------------------------
+    # 2) SAVE STATE OBSERVATIONS
+    # -------------------------------------------------------------------------
+    def _save_state_observations(self):
+        """Dump the current state vector for each env to a CSV."""
+        # lazily open CSV
+        if self._state_obs_file is None:
+            os.makedirs('/home/adi2440/Desktop/state_data', exist_ok=True)
+            fname = datetime.now().strftime("state_obs_%Y%m%d_%H%M%S.csv")
+            path = os.path.join('/home/adi2440/Desktop/state_data', fname)
+            self._state_obs_file = open(path, 'w', newline='')
+            self._state_csv_writer = csv.writer(self._state_obs_file)
+            # header: step, env_id, state_0 … state_N
+            header = ['step', 'env_id'] + [f'state_{i}' for i in range(self.cfg.state_dim)]
+            self._state_csv_writer.writerow(header)
+
+        step = self.common_step_counter
+        states = self._get_state_observations().cpu().numpy()  # (num_envs, state_dim)
+        for env_id in range(self.num_envs):
+            row = [step, env_id] + states[env_id].tolist()
+            self._state_csv_writer.writerow(row)
+
+        if step % 100 == 0:
+            self._state_obs_file.flush()
+
+    # -------------------------------------------------------------------------
+    # 3) SAVE IMAGE OBSERVATIONS
+    # -------------------------------------------------------------------------
+    def _save_image_observations(self):
+        """Save the processed camera observations (normalized, cropped, resized) as PNGs."""
+        # Lazily create output directory
+        if self._image_obs_dir is None:
+            self._image_obs_dir = '/home/adi2440/Desktop/image_data'
+            os.makedirs(self._image_obs_dir, exist_ok=True)
+
+        step = self.common_step_counter
+        # 1) Grab the processed tensor: shape (num_envs, C, H, W)
+        processed = self._get_camera_observations().cpu().numpy()
+
+        # 2) For each env, convert to H×W×C and shift back into [0,1] for saving
+        for env_id in range(self.num_envs):
+            proc = processed[env_id].transpose(1, 2, 0)      # → (H, W, C)
+            vis  = np.clip(proc + 0.5, 0.0, 1.0)             # undo mean subtraction
+            fname = f"ep{self._episode_counter:03d}_step{step:06d}_env{env_id}.png"
+            path  = os.path.join(self._image_obs_dir, fname)
+            plt.imsave(path, vis)
+
+        if step % 10 == 0:
+            print(f"[SAVE] Processed images saved to {self._image_obs_dir} at step {step}")
+
+
+
+
     def _debug_vis_callback(self, event):
-        """Update debug visualization markers."""
+        """Update debug visualization markers and save joint targets."""
         # Update target pose markers
         robot_pos = self._robot.data.root_state_w[:, :3]
         robot_quat = self._robot.data.root_state_w[:, 3:7]
@@ -1410,33 +1534,78 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Visualize the target positions
         self.target_pos_visualizer.visualize(translations=des_pos_w, orientations=des_quat_w)
         
-        # Additionally log APF beta values for first few environments
-        if self.common_step_counter % 10 == 0:  # Every 100 steps
+        # Calculate and update joint targets (moved outside the conditional block)
+        ee_position = self._ee_frame.data.target_pos_w[..., 0, :]
+        arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)
+        arm_position = self._arm.data.root_pos_w[:, :3]
+        arm_quat = self._arm.data.root_quat_w
+        
+        min_distances = self._point_to_box_distance(
+            ee_position, arm_position, arm_quat, arm_half_extents
+        )
+        beta_values = self._compute_beta_transition(min_distances)
 
-            # Calculate current beta values
-            ee_position = self._ee_frame.data.target_pos_w[..., 0, :]
-            arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)
-            arm_position = self._arm.data.root_pos_w[:, :3]
-            arm_quat = self._arm.data.root_quat_w
-            
-            min_distances = self._point_to_box_distance(
-                ee_position, arm_position, arm_quat, arm_half_extents
-            )
-            beta_values = self._compute_beta_transition(min_distances)
+        joint_vel = self._robot.data.joint_vel[:, self._joint_indices]
+        max_velocity = 1.5  # rad/s
+        current_joint_pos = self._robot.data.joint_pos[:, self._joint_indices]
+        velocity_command = (self._robot_dof_targets - current_joint_pos) / self.physics_dt
+        velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
+        self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
 
-            joint_vel = self._robot.data.joint_vel[:, self._joint_indices]
-            max_velocity = 1.5  # rad/s
-            current_joint_pos = self._robot.data.joint_pos[:, self._joint_indices]
-            velocity_command = (self._robot_dof_targets - current_joint_pos) / self.physics_dt
-            velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
-            self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
 
+        # self._save_joint_targets()
+
+        # # new: save state & image
+        # self._save_state_observations()
+        # self._save_image_observations()
+        
+        # Additionally log APF beta values for first few environments (every 10 steps)
+        if self.common_step_counter % 10 == 0:
             # Log for first 3 environments
             for i in range(min(3, self.num_envs)):
                 print(f"[APF] Env {i}: dist={min_distances[i]:.3f}m, β={beta_values[i]:.3f}")
-                print(f"Joint Velocities sent as observation to Env{i}: vel {joint_vel}")
-                print(f"Joint Velocities command added to action to Env{i}: vel {velocity_command}")
-                print(f"Action Target sent to robot Env{i}: action {self._robot_dof_targets}")
+                # print(f"Action Target sent to robot Env{i}: action {self._robot_dof_targets}")
+
+    def _save_joint_targets(self):
+        """Save joint targets for all environments at current timestep."""
+        
+        # Initialize file and tracking variables if not already done
+        if not hasattr(self, '_joint_targets_file'):
+            # Create output directory
+            os.makedirs('/home/adi2440/Desktop/joint_targets_data', exist_ok=True)
+            
+            # Create timestamped filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self._joint_targets_filename = f'/home/adi2440/Desktop/joint_targets_data/joint_targets_{timestamp}.csv'
+            
+            # Open file and write header
+            self._joint_targets_file = open(self._joint_targets_filename, 'w', newline='')
+            self._csv_writer = csv.writer(self._joint_targets_file)
+            
+            # Write header row
+            num_joints = len(self._joint_indices)
+            header = ['step', 'env_id'] + [f'joint_{i}_target' for i in range(num_joints)]
+            self._csv_writer.writerow(header)
+            
+            print(f"Started saving joint targets to: {self._joint_targets_filename}")
+        
+        # Save joint targets for all environments
+        current_step = self.common_step_counter
+        joint_targets_cpu = self._robot_dof_targets.cpu().numpy()
+        
+        for env_id in range(self.num_envs):
+            row = [current_step, env_id] + joint_targets_cpu[env_id].tolist()
+            self._csv_writer.writerow(row)
+        
+        # Flush to ensure data is written (optional, for safety)
+        if current_step % 100 == 0:  # Flush every 100 steps to balance performance and safety
+            self._joint_targets_file.flush()
+
+    def _cleanup_joint_targets_file(self):
+        """Close the joint targets file when simulation ends."""
+        if hasattr(self, '_joint_targets_file') and self._joint_targets_file:
+            self._joint_targets_file.close()
+            print(f"Joint targets data saved to: {self._joint_targets_filename}")
 
 
 # Factory function for creating the environment
