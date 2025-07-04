@@ -79,8 +79,6 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
     marker_cfg.prim_path = "/Visuals/FrameTransformer"
     
-
-
     # UR5 Robot
     robot_cfg: ArticulationCfg = UR5_GRIPPER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
@@ -125,7 +123,6 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
         ),
     )
 
-
     # White plane configuration
     white_plane_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/white_plane",
@@ -155,7 +152,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Frame transformer for end-effector
     ee_frame_cfg: FrameTransformerCfg = FrameTransformerCfg(
         prim_path="/World/envs/env_.*/Robot/base_link",
-        debug_vis=debug_vis,  # Now this works since enable_debug_vis is defined above
+        debug_vis=debug_vis,  # Now this works since debug_vis is defined above
         visualizer_cfg=marker_cfg,
         target_frames=[
             FrameTransformerCfg.FrameCfg(
@@ -167,10 +164,11 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
             ),
         ],
     )
-    
-    # Camera
+
+    # Camera sensor configuration
     tiled_camera: TiledCameraCfg = TiledCameraCfg(
         prim_path="/World/envs/env_.*/Camera",
+        update_period=0.05,  # Update camera at 20 Hz
         data_types=["rgb"],
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=2.208,
@@ -204,7 +202,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
         "image": gym.spaces.Box(low=float("-inf"), high=float("inf"), shape=(camera_target_height, camera_target_width, 3)),
         "state": gym.spaces.Box(low=float("-inf"), high=float("inf"), shape=(state_dim,)),
     })
-    
+
     # Simulation settings
     sim: SimulationCfg = SimulationCfg(
         dt=1.0/120.0,
@@ -217,21 +215,26 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
             restitution=0.0,
         ),
     )
-    
-    # Scene settings
+
+    # Scene configuration
     scene: InteractiveSceneCfg = InteractiveSceneCfg(
         num_envs=8, 
         env_spacing=4.0,
         replicate_physics=True,
     )
-    
+
     # Viewer settings
     viewer = ViewerCfg(eye=(7.5, 7.5, 7.5), origin_type="world", env_index=0)
     
-    # Curriculum learning settings
+    # Arm presence settings
+    arm_presence_base_probability = 0.6  # Base 60% chance of arm being present
+    arm_absent_position = (0.0, 0.0, -15.0)  # Position far away when arm is absent
+    
+    # Curriculum learning settings with arm presence
     curriculum_enabled = True
     curriculum_steps = [5000, 10000, 20000, 40000]  # Steps at which to increase difficulty
     curriculum_arm_speeds = [0.0, 0.1, 0.2, 0.3]  # Progressive arm movement speeds
+    curriculum_arm_presence_probs = [0.1, 0.3, 0.5, 0.6]  # Progressive arm presence probabilities
     curriculum_target_ranges = [
         {"x": (0.55, 0.65), "y": (0.45, 0.5), "z": (-0.1, 0.1)},   # Easy
         {"x": (0.5, 0.7), "y": (0.4, 0.5), "z": (-0.15, 0.15)},    # Medium
@@ -241,7 +244,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Success tracking for adaptive curriculum
     success_window_size = 100
-    curriculum_advance_threshold = 0.7  # Advance when success rate > 70%
+    curriculum_advance_threshold = 0.5  # Advance when success rate > 70%
 
     # Command/target pose settings
     target_pose_range = {
@@ -252,12 +255,6 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
         "pitch": (1.57, 1.57),
         "yaw": (0.0, 0.0),
     }
-
-    # target_ee_bounds = {
-    #     "x": (0.35, 0.85),
-    #     "y": (-0.6, 0.6),
-    #     "z": (-0.4, 0.4),  # wrt base link of robot [-80mm to +320mm] irl
-    # }
 
     command_resampling_time = 6.0
     
@@ -274,9 +271,10 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     reward_distance_tanh_weight = 1.5
     reward_distance_tanh_std = 0.1
     reward_orientation_weight = -0.2
-    reward_torque_weight = -0.001  # Replaced torque with action penalty
+    reward_torque_weight = -0.001
     reward_table_collision_weight = -4.0
-    reward_arm_avoidance_weight = 7.0  # Changed from obstacle
+    reward_arm_avoidance_weight = 7.0
+    reward_path_efficiency_weight = -0.5  # Penalty for inefficient paths when arm is absent
     
     # Artificial Potential Field parameters
     apf_critical_distance = 0.15  # db - critical distance for obstacle avoidance
@@ -288,12 +286,12 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Action filter settings
     action_filter_order = 2
-    action_filter_cutoff_freq = 8.0
+    action_filter_cutoff_freq = 2.0
     action_filter_damping_ratio = 0.707
     
     # Termination settings
-    position_threshold = 0.01
-    orientation_threshold = 0.05
+    position_threshold = 0.05
+    orientation_threshold = 0.1
     velocity_threshold = 0.05
     torque_threshold = 1.0
     bounds_safety_margin = 0.1  # 0.1m margin for bounds checking
@@ -305,11 +303,10 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Visualization settings
     visualize_camera_interval = 20000  # Visualize camera every N steps
     visualization_save_path = "/home/adi2440/Desktop/camera_obs/"  # Path to save visualizations
-
     
     # Noise settings
-    joint_pos_noise_min = -0.05
-    joint_pos_noise_max = 0.05
+    joint_pos_noise_min = -0.01
+    joint_pos_noise_max = 0.01
     joint_vel_noise_min = -0.001
     joint_vel_noise_max = 0.001
     
@@ -318,12 +315,17 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     robot_reset_noise_range = 0.05
 
 
+##
+# Environment implementation
+##
+
 class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
-    """Direct RL environment for object camera pose tracking with multi-observation space."""
-    
+    """Direct RL environment for object camera pose tracking."""
+
     cfg: ObjCameraPoseTrackingDirectEnvCfg
-    
+
     def __init__(self, cfg: ObjCameraPoseTrackingDirectEnvCfg, render_mode: str | None = None, **kwargs):
+        """Initialize the environment."""
         # Store config
         self.cfg = cfg
 
@@ -334,12 +336,13 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self._state_obs_file    = None
         self._state_csv_writer  = None
         self._image_obs_dir     = None
+        
         # Initialize parent
         super().__init__(cfg, render_mode, **kwargs)
         
         # Initialize extras dictionary for logging
         self.extras = {"log": {}}
-        
+
         # Joint names and indices
         self._joint_names = [
             "shoulder_pan_joint",
@@ -365,6 +368,10 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Arm movement state
         self._arm_target_pos = torch.zeros((self.num_envs, 3), device=self.device)
         
+        # Arm presence tracking
+        self._arm_present = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
+        self._arm_presence_probability = self.cfg.arm_presence_base_probability
+        
         # Initialize action filter
         self._setup_action_filter()
         
@@ -382,6 +389,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             "total_reward": torch.zeros(self.num_envs, device=self.device),
             "success_count": torch.zeros(self.num_envs, device=self.device),
             "min_arm_distance": torch.ones(self.num_envs, device=self.device) * float('inf'),
+            "path_efficiency": torch.zeros(self.num_envs, device=self.device),
         }
         
         # Log initial information
@@ -393,6 +401,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         print(f"[INFO] Arm bounds X: {self.cfg.arm_position_bounds['x']}")
         print(f"[INFO] Arm bounds Y: {self.cfg.arm_position_bounds['y']}")
         print(f"[INFO] Arm bounds Z: {self.cfg.arm_position_bounds['z']}")
+        print(f"[INFO] Base arm presence probability: {self.cfg.arm_presence_base_probability}")
         
         # Setup debug visualization if enabled
         self.set_debug_vis(self.cfg.debug_vis)
@@ -403,7 +412,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         # Initialize visualization counter
         self._vis_counter = 0
-
 
     def close(self):
         """Cleanup for the environment."""
@@ -448,7 +456,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         dir_light_cfg = sim_utils.DistantLightCfg(intensity=1000.0, color=(1.0, 1.0, 0.9), angle=0.53)
         dir_light_cfg.func("/World/DirectionalLight", dir_light_cfg)
 
-        
     def _setup_action_filter(self):
         """Initialize action filter states and coefficients."""
         num_joints = len(self._joint_indices)
@@ -471,7 +478,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             self._filter_b2 = a1 / a3
             self._filter_a1 = (2.0 * a1 - 2.0) / a3
             self._filter_a2 = (a1 - a2 + 1.0) / a3
-    
+
     def _update_curriculum_settings(self):
         """Update environment settings based on curriculum level."""
         if not self.cfg.curriculum_enabled:
@@ -483,14 +490,19 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         if level < len(self.cfg.curriculum_arm_speeds):
             self.cfg.arm_movement_speed = self.cfg.curriculum_arm_speeds[level]
         
+        # Update arm presence probability
+        if level < len(self.cfg.curriculum_arm_presence_probs):
+            self._arm_presence_probability = self.cfg.curriculum_arm_presence_probs[level]
+        
         # Update target pose ranges
         if level < len(self.cfg.curriculum_target_ranges):
             self.cfg.target_pose_range.update(self.cfg.curriculum_target_ranges[level])
         
         print(f"[CURRICULUM] Level {level}: arm_speed={self.cfg.arm_movement_speed:.2f}, "
+              f"arm_presence_prob={self._arm_presence_probability:.2f}, "
               f"target_x={self.cfg.target_pose_range['x']}, "
               f"target_y={self.cfg.target_pose_range['y']}")
-    
+
     def _check_curriculum_advancement(self):
         """Check if curriculum should advance based on success rate."""
         if not self.cfg.curriculum_enabled:
@@ -510,12 +522,11 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
                     # Reset success buffer for new level
                     self._success_buffer.zero_()
                     print(f"[CURRICULUM] Advanced to level {self._curriculum_level} at step {self.common_step_counter}")
-    
+
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         """Apply actions before physics step."""
         # Store raw actions
         self.actions = actions.clone().clamp(-3.5, 3.5)
-
         
         # Apply action filtering
         filtered_actions = self._apply_action_filter(self.actions)
@@ -538,13 +549,12 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Check curriculum advancement
         self._check_curriculum_advancement()
         
-        #IF robot is stuck at the table, reset it
+        # IF robot is stuck at the table, reset it
         self._reset_robot_when_stuck_at_table()
 
         # Update arm position
         self._update_arm_position()
 
-        
     def _apply_action(self) -> None:
         """Apply the processed actions to the robot with safety checks."""
         # Get current joint positions
@@ -571,7 +581,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self._robot.set_joint_position_target(
             self._robot_dof_targets, joint_ids=self._joint_indices
         )
-        
+
     def _apply_action_filter(self, actions: torch.Tensor) -> torch.Tensor:
         """Apply second-order Butterworth filter to actions."""
         if self.cfg.action_filter_order == 2:
@@ -599,37 +609,40 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         if num == 0:
             return
 
-        # sample positions within configured ranges
+        # Get current curriculum target range (includes orientation)
+        target_range = self._get_current_target_range()
+
+        # sample positions within curriculum-adjusted ranges
         x = sample_uniform(
-            self.cfg.target_pose_range["x"][0],
-            self.cfg.target_pose_range["x"][1],
+            target_range["x"][0],
+            target_range["x"][1],
             (num,), self.device
         )
         y = sample_uniform(
-            self.cfg.target_pose_range["y"][0],
-            self.cfg.target_pose_range["y"][1],
+            target_range["y"][0],
+            target_range["y"][1],
             (num,), self.device
         )
         z = sample_uniform(
-            self.cfg.target_pose_range["z"][0],
-            self.cfg.target_pose_range["z"][1],
+            target_range["z"][0],
+            target_range["z"][1],
             (num,), self.device
         )
 
-        # sample orientations (roll, pitch, yaw)
+        # sample orientations (roll, pitch, yaw) from target_range
         roll = sample_uniform(
-            self.cfg.target_pose_range["roll"][0],
-            self.cfg.target_pose_range["roll"][1],
+            target_range["roll"][0],
+            target_range["roll"][1],
             (num,), self.device
         )
         pitch = sample_uniform(
-            self.cfg.target_pose_range["pitch"][0],
-            self.cfg.target_pose_range["pitch"][1],
+            target_range["pitch"][0],
+            target_range["pitch"][1],
             (num,), self.device
         )
         yaw = sample_uniform(
-            self.cfg.target_pose_range["yaw"][0],
-            self.cfg.target_pose_range["yaw"][1],
+            target_range["yaw"][0],
+            target_range["yaw"][1],
             (num,), self.device
         )
         quat = math_utils.quat_from_euler_xyz(roll, pitch, yaw)
@@ -650,6 +663,9 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             self._arm_motion_time = torch.zeros(self.num_envs, device=self.device)
             self._arm_motion_pattern = torch.randint(0, 3, (self.num_envs,), device=self.device)  # 0: X-axis, 1: Y-axis, 2: diagonal
         
+        # Only update positions for environments with arm present
+        arm_present_mask = self._arm_present
+        
         # Get current arm positions and orientations
         arm_positions = self._arm.data.root_pos_w.clone()
         arm_quats = self._arm.data.root_quat_w.clone()
@@ -658,6 +674,12 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self._arm_motion_time += self.physics_dt
         
         for i in range(self.num_envs):
+            if not arm_present_mask[i]:
+                # Keep arm at absent position
+                absent_position = torch.tensor(self.cfg.arm_absent_position, device=self.device)
+                arm_positions[i, :3] = absent_position + self.scene.env_origins[i, :3]
+                continue
+                
             # Calculate base position (center of motion range)
             base_x = (self.cfg.arm_position_bounds["x"][0] + self.cfg.arm_position_bounds["x"][1]) / 2
             base_y = (self.cfg.arm_position_bounds["y"][0] + self.cfg.arm_position_bounds["y"][1]) / 2
@@ -707,6 +729,9 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             velocities = torch.zeros((self.num_envs, 6), device=self.device)
             
             for i in range(self.num_envs):
+                if not arm_present_mask[i]:
+                    continue
+                    
                 # Calculate velocity based on motion pattern and phase
                 period = 4.0
                 phase = (self._arm_motion_time[i] % period) / period
@@ -727,7 +752,73 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             self._arm.write_root_velocity_to_sim(
                 torch.zeros((self.num_envs, 6), device=self.device)
             )
+
+    def _reset_robot_when_stuck_at_table(self):
+        """Reset robot to a safe position when it gets stuck at the table."""
+        # Default safe poses (well above table)
+        safe_poses = [
+            [-0.71055204, -1.3046993, 1.9, -2.23, -1.59000665, 1.76992667],
+            [-0.568, -0.658, 1.602, -2.585, -1.6060665, -1.64142667],  # Alternative safe pose
+        ]
         
+        # Get end-effector position
+        ee_position = self._ee_frame.data.target_pos_w[..., 0, :]
+        ee_height = ee_position[:, 2]
+        
+        # Check which environments have robots stuck at table
+        table_height = TABLE_HEIGHT
+        safety_margin = 0.05
+        stuck_at_table = ee_height < (table_height + safety_margin)
+        
+        # Get environment IDs that are stuck
+        stuck_env_ids = torch.nonzero(stuck_at_table, as_tuple=False).squeeze(-1)
+        
+        if len(stuck_env_ids) == 0:
+            return
+        
+        # Reset stuck robots to safe positions
+        for env_id in stuck_env_ids:
+            # Choose a random safe pose
+            import random
+            base_pose = random.choice(safe_poses)
+            
+            # Convert pose to tensor and add noise
+            joint_pos_base = torch.tensor(base_pose, device=self.device, dtype=torch.float32)
+            noise_range = 0.02
+            noise = torch.rand(len(base_pose), device=self.device) * 2 * noise_range - noise_range
+            joint_pos = joint_pos_base + noise
+            joint_vel = torch.zeros_like(joint_pos)
+            
+            # Clamp to joint limits
+            joint_pos = torch.clamp(
+                joint_pos,
+                self._robot_dof_lower_limits,
+                self._robot_dof_upper_limits
+            )
+            
+            # Convert env_id to tensor
+            env_id_tensor = torch.tensor([env_id], device=self.device, dtype=torch.long)
+            
+            # Reset robot to safe position
+            self._robot.set_joint_position_target(
+                joint_pos.unsqueeze(0), 
+                joint_ids=self._joint_indices, 
+                env_ids=env_id_tensor
+            )
+            self._robot.write_joint_state_to_sim(
+                joint_pos.unsqueeze(0), 
+                joint_vel.unsqueeze(0), 
+                joint_ids=self._joint_indices, 
+                env_ids=env_id_tensor
+            )
+            
+            # Update target to prevent immediate re-collision
+            self._robot_dof_targets[env_id] = joint_pos
+            
+            # Log the reset
+            if len(stuck_env_ids) <= 2:  # Avoid spam
+                print(f"[INFO] Reset stuck robot in environment {env_id.item()}")
+
     def _get_observations(self) -> dict:
         """Compute and return observations as a dictionary."""
         # Get state observations
@@ -753,28 +844,17 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         else:
             joint_pos_noisy = joint_pos
         
-        # Get joint velocities with noise
-        # joint_vel = self._robot.data.joint_vel[:, self._joint_indices]
-        # if self.cfg.joint_vel_noise_max > 0:
-        #     joint_vel_noise = torch.rand_like(joint_vel) * (
-        #         self.cfg.joint_vel_noise_max - self.cfg.joint_vel_noise_min
-        #     ) + self.cfg.joint_vel_noise_min
-        #     joint_vel_noisy = joint_vel + joint_vel_noise
-        # else:
-        #     joint_vel_noisy = joint_vel
-        
         # Get target pose (already in robot base frame)
         target_pose = self._target_poses
         
         # Concatenate all state observations
         state_obs = torch.cat([
             joint_pos_noisy,      # 6 dims
-            # joint_vel_noisy,      # 6 dims
             target_pose,          # 7 dims
         ], dim=-1)
         
         return state_obs
-    
+
     def _visualize_camera_observation(self, raw_image: torch.Tensor, processed_image: torch.Tensor, env_id: int = 0):
         """Visualize raw and processed camera observations for debugging."""
         # Create figure with subplots
@@ -836,7 +916,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             print(f"[VIS] Saved camera observation to: {filename}")
         
         self._vis_counter += 1
-    
+
     def _get_camera_observations(self) -> torch.Tensor:
         """Get and preprocess camera observations."""
         # Get camera data
@@ -874,7 +954,85 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             self._visualize_camera_observation(raw_camera_data, resized, env_id=0)
         
         return resized
-    
+
+    def _compute_arm_presence_for_episode(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Compute whether arm should be present for each environment based on curriculum."""
+        num_envs = len(env_ids)
+        # Use current curriculum arm presence probability
+        arm_presence_prob = self._arm_presence_probability
+        
+        # Random sampling for arm presence
+        arm_present = torch.rand(num_envs, device=self.device) < arm_presence_prob
+        
+        return arm_present
+
+    def _compute_beta_transition(self, distances: torch.Tensor) -> torch.Tensor:
+        """Compute smooth transition factor β for adaptive reward mixing."""
+        x = (distances - self.cfg.apf_critical_distance) / self.cfg.apf_smoothness
+        beta = (torch.tanh(x) + 1.0) / 2.0
+        return beta
+
+    def _point_to_box_distance(self, points: torch.Tensor, box_pos: torch.Tensor, 
+                            box_quat: torch.Tensor, half_extents: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate minimum distance from points to oriented boxes.
+        
+        Args:
+            points: Points to check (N, 3)
+            box_pos: Box center positions (N, 3)
+            box_quat: Box orientations as quaternions (N, 4)
+            half_extents: Box half-extents (3,)
+        
+        Returns:
+            Minimum distances (N,)
+        """
+        # Transform points to box local frame
+        relative_pos = points - box_pos
+        
+        # Convert quaternion to rotation matrix for inverse transform
+        # Using math_utils to handle quaternion operations
+        inv_box_quat = math_utils.quat_inv(box_quat)
+        
+        # Rotate points to box local frame
+        local_points = math_utils.quat_apply(inv_box_quat, relative_pos)
+        
+        # Find closest point on box surface
+        # Clamp to box bounds
+        closest_point_local = torch.clamp(
+            local_points, 
+            -half_extents.unsqueeze(0), 
+            half_extents.unsqueeze(0)
+        )
+        
+        # Check if point is inside the box
+        inside_box = torch.all(
+            torch.abs(local_points) <= half_extents.unsqueeze(0), 
+            dim=-1
+        )
+        
+        # For points inside the box, find distance to nearest face
+        # For points outside, use standard distance
+        distances = torch.zeros(self.num_envs, device=self.device)
+        
+        for i in range(self.num_envs):
+            if inside_box[i]:
+                # Find distance to each face and take minimum
+                distances_to_faces = torch.zeros(6, device=self.device)
+                distances_to_faces[0] = half_extents[0] - local_points[i, 0]  # +X face
+                distances_to_faces[1] = local_points[i, 0] + half_extents[0]  # -X face
+                distances_to_faces[2] = half_extents[1] - local_points[i, 1]  # +Y face
+                distances_to_faces[3] = local_points[i, 1] + half_extents[1]  # -Y face
+                distances_to_faces[4] = half_extents[2] - local_points[i, 2]  # +Z face
+                distances_to_faces[5] = local_points[i, 2] + half_extents[2]  # -Z face
+                
+                # Minimum distance to any face (negative to indicate inside)
+                distances[i] = -torch.min(distances_to_faces)
+            else:
+                # Standard distance calculation for outside points
+                distances[i] = torch.norm(local_points[i] - closest_point_local[i])
+        
+        return distances
+
     def _huber_loss(self, x: torch.Tensor, delta: float) -> torch.Tensor:
         """Compute Huber loss for robust distance penalty."""
         abs_x = torch.abs(x)
@@ -883,13 +1041,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             0.5 * x * x,
             delta * (abs_x - 0.5 * delta)
         )
-    
-    def _compute_beta_transition(self, min_distances: torch.Tensor) -> torch.Tensor:
-        """Compute smooth transition factor β for adaptive reward mixing."""
-        x = (min_distances - self.cfg.apf_critical_distance) / self.cfg.apf_smoothness
-        beta = (torch.tanh(x) + 1.0) / 2.0
-        return beta
-    
+
     def _compute_energy_reward(self) -> torch.Tensor:
         """Compute energy-based reward from joint velocities."""
         joint_velocities = self._robot.data.joint_vel[:, self._joint_indices]
@@ -898,7 +1050,23 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Sum tanh over all 6 joints for each environment
         energy_reward = -torch.sum(torch.tanh(velocity_norms_squared), dim=1)
         return energy_reward
-    
+
+    def _compute_path_efficiency_penalty(self, position_error: torch.Tensor) -> torch.Tensor:
+        """Compute penalty for taking inefficient paths when arm is absent."""
+        # Only penalize environments where arm is absent
+        arm_absent_mask = ~self._arm_present
+        
+        # Base penalty on deviation from direct path
+        # We use a simple heuristic: penalize based on current distance to target
+        # The penalty increases if the robot maintains large distance over time
+        efficiency_penalty = torch.where(
+            arm_absent_mask,
+            position_error * self.cfg.reward_path_efficiency_weight,
+            torch.zeros_like(position_error)
+        )
+        
+        return efficiency_penalty
+
     def _get_rewards(self) -> torch.Tensor:
         """Compute rewards using Artificial Potential Field approach with Huber loss."""
         # Initialize rewards
@@ -920,7 +1088,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         )
         des_quat_w = math_utils.quat_mul(robot_quat, des_quat_b)
         
-        # Calculate distances to arm obstacle
+        # Calculate distances to arm obstacle (only for environments with arm present)
         arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)
         arm_position = self._arm.data.root_pos_w[:, :3]
         arm_quat = self._arm.data.root_quat_w
@@ -930,6 +1098,13 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             arm_position, 
             arm_quat, 
             arm_half_extents
+        )
+        
+        # Set large distance for environments where arm is absent
+        min_distances_to_arm = torch.where(
+            self._arm_present,
+            min_distances_to_arm,
+            torch.ones_like(min_distances_to_arm) * 10.0  # Large distance when arm absent
         )
         
         # Compute β transition factor for APF
@@ -976,34 +1151,43 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         )
         traditional_rewards += table_penalty
         
-        # 6. Arm avoidance rewards (part of traditional rewards)
+        # 6. Arm avoidance rewards (only for environments with arm present)
         arm_reward = self._compute_arm_avoidance_rewards() * self.cfg.reward_arm_avoidance_weight
+        # Only apply arm avoidance reward when arm is present
+        arm_reward = torch.where(self._arm_present, arm_reward, torch.zeros_like(arm_reward))
         traditional_rewards += arm_reward
+        
+        # 7. Path efficiency penalty (only when arm is absent)
+        path_penalty = self._compute_path_efficiency_penalty(position_error)
+        traditional_rewards += path_penalty
 
-        # 7 Success for reaching the end goal and avoiding the arm
-        # Calculate minimum distance from end effector to arm cuboid
-        # Arm dimensions (half-extents for easier calculation)
-        arm_half_extents = torch.tensor([0.25, 0.1, 0.06], device=self.device)  # [0.5, 0.2, 0.12] / 2
-        arm_position = self._arm.data.root_pos_w[:, :3]
-        arm_quat = self._arm.data.root_quat_w
-
-        min_distances = self._point_to_box_distance(
-            ee_position, 
-            arm_position, 
-            arm_quat, 
-            arm_half_extents
-        )
+        # 8. Success for reaching the end goal and avoiding the arm
         joint_velocities = torch.norm(self._robot.data.joint_vel, p=2, dim=-1)
-
-        success_mask = (position_error < 0.05) & (min_distances > 0.08) & (joint_velocities < self.cfg.velocity_threshold)
+        
+        # Success conditions depend on arm presence
+        success_with_arm = (position_error < 0.05) & (min_distances_to_arm > 0.08)
+        success_without_arm = (position_error < 0.05) 
+        
+        success_mask = torch.where(
+            self._arm_present,
+            success_with_arm,
+            success_without_arm
+        )
         traditional_rewards += torch.where(success_mask, 5.0, 0.0)
         
         # === Energy-based Rewards (Renergy) ===
         energy_rewards = self._compute_energy_reward() * self.cfg.energy_reward_weight
         
         # === Adaptive Combination using APF ===
+        # For environments without arm, use mostly traditional rewards
+        beta_adjusted = torch.where(
+            self._arm_present,
+            beta,
+            torch.ones_like(beta) * 0.9  # Favor traditional rewards when no arm
+        )
+        
         # Rada = β · Rt + (1 − β) · Renergy
-        rewards = beta * traditional_rewards + (1.0 - beta) * energy_rewards
+        rewards = beta_adjusted * traditional_rewards + (1.0 - beta_adjusted) * energy_rewards
         
         # Track reward components for logging
         if hasattr(self, '_episode_sums'):
@@ -1012,9 +1196,9 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             self._episode_sums["min_arm_distance"] = torch.minimum(
                 self._episode_sums["min_arm_distance"], min_distances_to_arm
             )
+            self._episode_sums["path_efficiency"] += path_penalty
             
             # Check for success
-            success_mask = (position_error < 0.05) & (min_distances_to_arm > 0.08)
             self._episode_sums["success_count"] += success_mask.float()
             
             # Update success buffer for curriculum learning
@@ -1026,22 +1210,24 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Log detailed reward breakdown for first environment occasionally
         if self.common_step_counter % 500 == 0 and self.num_envs > 0:
             env_0_data = {
+                "arm_present": self._arm_present[0].item(),
                 "position_error": position_error[0].item(),
                 "position_huber": position_huber_loss[0].item(),
                 "orientation_error": orientation_error[0].item(),
-                # "action_penalty": torque_penalty[0].item(),
                 "min_dist_to_arm": min_distances_to_arm[0].item(),
-                "beta": beta[0].item(),
+                "beta": beta_adjusted[0].item(),
                 "energy_reward": energy_rewards[0].item(),
+                "path_penalty": path_penalty[0].item(),
                 "total_reward": rewards[0].item()
             }
-            # print(f"[REWARD] Env 0 - Beta: {env_0_data['beta']:.3f}, "
-            #       f"Dist to arm: {env_0_data['min_dist_to_arm']:.3f}, "
-            #       f"Energy: {env_0_data['energy_reward']:.3f}, "
-            #       f"Total: {env_0_data['total_reward']:.3f}")
+            print(f"[REWARD] Env 0 - Arm: {'Present' if env_0_data['arm_present'] else 'Absent'}, "
+                  f"Beta: {env_0_data['beta']:.3f}, "
+                  f"Dist to arm: {env_0_data['min_dist_to_arm']:.3f}, "
+                  f"Path penalty: {env_0_data['path_penalty']:.3f}, "
+                  f"Total: {env_0_data['total_reward']:.3f}")
         
         return rewards
-    
+
     def _compute_arm_avoidance_rewards(self) -> torch.Tensor:
         """Compute arm avoidance rewards with dynamic collision risk assessment."""
         rewards = torch.zeros(self.num_envs, device=self.device)
@@ -1110,134 +1296,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         return rewards
 
-    def _point_to_box_distance(self, points: torch.Tensor, box_pos: torch.Tensor, 
-                            box_quat: torch.Tensor, half_extents: torch.Tensor) -> torch.Tensor:
-        """
-        Calculate minimum distance from points to oriented boxes.
-        
-        Args:
-            points: Points to check (N, 3)
-            box_pos: Box center positions (N, 3)
-            box_quat: Box orientations as quaternions (N, 4)
-            half_extents: Box half-extents (3,)
-        
-        Returns:
-            Minimum distances (N,)
-        """
-        # Transform points to box local frame
-        relative_pos = points - box_pos
-        
-        # Convert quaternion to rotation matrix for inverse transform
-        # Using math_utils to handle quaternion operations
-        inv_box_quat = math_utils.quat_inv(box_quat)
-        
-        # Rotate points to box local frame
-        local_points = math_utils.quat_apply(inv_box_quat, relative_pos)
-        
-        # Find closest point on box surface
-        # Clamp to box bounds
-        closest_point_local = torch.clamp(
-            local_points, 
-            -half_extents.unsqueeze(0), 
-            half_extents.unsqueeze(0)
-        )
-        
-        # Check if point is inside the box
-        inside_box = torch.all(
-            torch.abs(local_points) <= half_extents.unsqueeze(0), 
-            dim=-1
-        )
-        
-        # For points inside the box, find distance to nearest face
-        # For points outside, use standard distance
-        distances = torch.zeros(self.num_envs, device=self.device)
-        
-        for i in range(self.num_envs):
-            if inside_box[i]:
-                # Find distance to each face and take minimum
-                distances_to_faces = torch.zeros(6, device=self.device)
-                distances_to_faces[0] = half_extents[0] - local_points[i, 0]  # +X face
-                distances_to_faces[1] = local_points[i, 0] + half_extents[0]  # -X face
-                distances_to_faces[2] = half_extents[1] - local_points[i, 1]  # +Y face
-                distances_to_faces[3] = local_points[i, 1] + half_extents[1]  # -Y face
-                distances_to_faces[4] = half_extents[2] - local_points[i, 2]  # +Z face
-                distances_to_faces[5] = local_points[i, 2] + half_extents[2]  # -Z face
-                
-                # Minimum distance to any face (negative to indicate inside)
-                distances[i] = -torch.min(distances_to_faces)
-            else:
-                # Standard distance calculation for outside points
-                distances[i] = torch.norm(local_points[i] - closest_point_local[i])
-        
-        return distances
-
-
-    def _reset_robot_when_stuck_at_table(self):
-        """Reset robot to a safe position when it gets stuck at the table."""
-        # Default safe poses (well above table)
-        safe_poses = [
-            [-0.71055204, -1.3046993, 1.9, -2.23, -1.59000665, 1.76992667],
-            [-0.568, -0.658, 1.602, -2.585, -1.6060665, -1.64142667],  # Alternative safe pose
-        ]
-        
-        # Get end-effector position
-        ee_position = self._ee_frame.data.target_pos_w[..., 0, :]
-        ee_height = ee_position[:, 2]
-        
-        # Check which environments have robots stuck at table
-        table_height = TABLE_HEIGHT
-        safety_margin = 0.05
-        stuck_at_table = ee_height < (table_height + safety_margin)
-        
-        # Get environment IDs that are stuck
-        stuck_env_ids = torch.nonzero(stuck_at_table, as_tuple=False).squeeze(-1)
-        
-        if len(stuck_env_ids) == 0:
-            return
-        
-        # Reset stuck robots to safe positions
-        for env_id in stuck_env_ids:
-            # Choose a random safe pose
-            import random
-            base_pose = random.choice(safe_poses)
-            
-            # Convert pose to tensor and add noise
-            joint_pos_base = torch.tensor(base_pose, device=self.device, dtype=torch.float32)
-            noise_range = 0.02
-            noise = torch.rand(len(base_pose), device=self.device) * 2 * noise_range - noise_range
-            joint_pos = joint_pos_base + noise
-            joint_vel = torch.zeros_like(joint_pos)
-            
-            # Clamp to joint limits
-            joint_pos = torch.clamp(
-                joint_pos,
-                self._robot_dof_lower_limits,
-                self._robot_dof_upper_limits
-            )
-            
-            # Convert env_id to tensor
-            env_id_tensor = torch.tensor([env_id], device=self.device, dtype=torch.long)
-            
-            # Reset robot to safe position
-            self._robot.set_joint_position_target(
-                joint_pos.unsqueeze(0), 
-                joint_ids=self._joint_indices, 
-                env_ids=env_id_tensor
-            )
-            self._robot.write_joint_state_to_sim(
-                joint_pos.unsqueeze(0), 
-                joint_vel.unsqueeze(0), 
-                joint_ids=self._joint_indices, 
-                env_ids=env_id_tensor
-            )
-            
-            # Update target to prevent immediate re-collision
-            self._robot_dof_targets[env_id] = joint_pos
-            
-            # Log the reset
-            if len(stuck_env_ids) <= 2:  # Avoid spam
-                print(f"[INFO] Reset stuck robot in environment {env_id.item()}")
-
     def _get_dones(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute and return termination flags."""
         # Time limit truncation
@@ -1274,11 +1332,10 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Task success
         task_success = position_success & orientation_success & velocity_success
         
-        
         # Early termination combines time out and bounds violation
         early_termination = time_out 
         return task_success, early_termination
-    
+
     def _reset_idx(self, env_ids: Sequence[int] | None):
         """Reset specified environments."""
         if env_ids is None:
@@ -1290,23 +1347,33 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         self._mark_episode_start()
 
+        # Determine arm presence for each resetting environment
+        env_ids_tensor = torch.tensor(env_ids, device=self.device)
+        self._arm_present[env_ids] = self._compute_arm_presence_for_episode(env_ids_tensor)
+
         # Print episode statistics for completed environments
         if len(env_ids) > 0 and hasattr(self, '_episode_sums'):
             avg_position_error = self._episode_sums["position_error"][env_ids].mean().item()
             avg_reward = self._episode_sums["total_reward"][env_ids].mean().item()
             success_rate = self._episode_sums["success_count"][env_ids].mean().item()
             min_arm_dist = self._episode_sums["min_arm_distance"][env_ids].mean().item()
+            avg_path_efficiency = self._episode_sums["path_efficiency"][env_ids].mean().item()
+            arm_present_ratio = self._arm_present[env_ids].float().mean().item()
             
             if self.common_step_counter % 1000 == 0:  # Log every 1000 steps
                 print(f"[INFO] Episode stats - Pos error: {avg_position_error:.4f}, "
                       f"Reward: {avg_reward:.2f}, Success: {success_rate:.2f}, "
-                      f"Min arm dist: {min_arm_dist:.3f}, "
+                      f"Min arm dist: {min_arm_dist:.3f}, Path eff: {avg_path_efficiency:.3f}, "
+                      f"Arm present: {arm_present_ratio:.2f}, "
                       f"Curriculum: L{self._curriculum_level}")
         
         # Reset episode tracking
         if hasattr(self, '_episode_sums'):
             for key in self._episode_sums:
-                self._episode_sums[key][env_ids] = 0.0
+                if key == "min_arm_distance":
+                    self._episode_sums[key][env_ids] = float('inf')
+                else:
+                    self._episode_sums[key][env_ids] = 0.0
         
         # Reset robot joint positions
         num_resets = len(env_ids)
@@ -1337,36 +1404,77 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         )
         
         # Reset arm position and orientation targets
-        for i, env_id in enumerate(env_ids):
-            # Random position within bounds
-            self._arm_target_pos[env_id, 0] = torch.rand(1, device=self.device) * (
+        num_resets = len(env_ids)
+
+        # Separate environments where arm is present vs absent
+        arm_present_mask = self._arm_present[env_ids]
+        present_env_ids = env_ids[arm_present_mask] if arm_present_mask.any() else torch.tensor([], device=self.device, dtype=torch.long)
+        absent_env_ids = env_ids[~arm_present_mask] if (~arm_present_mask).any() else torch.tensor([], device=self.device, dtype=torch.long)
+
+        # Process environments where arm is present
+        if len(present_env_ids) > 0:
+            # Randomize positions within bounds for present arms
+            num_present = len(present_env_ids)
+            
+            # Sample random positions within bounds
+            random_x = torch.rand(num_present, device=self.device) * (
                 self.cfg.arm_position_bounds["x"][1] - self.cfg.arm_position_bounds["x"][0]
             ) + self.cfg.arm_position_bounds["x"][0]
             
-            self._arm_target_pos[env_id, 1] = torch.rand(1, device=self.device) * (
+            random_y = torch.rand(num_present, device=self.device) * (
                 self.cfg.arm_position_bounds["y"][1] - self.cfg.arm_position_bounds["y"][0]
             ) + self.cfg.arm_position_bounds["y"][0]
             
-            self._arm_target_pos[env_id, 2] = torch.rand(1, device=self.device) * (
+            random_z = torch.rand(num_present, device=self.device) * (
                 self.cfg.arm_position_bounds["z"][1] - self.cfg.arm_position_bounds["z"][0]
             ) + self.cfg.arm_position_bounds["z"][0]
-        
-        # Set initial arm pose
-        new_positions = self._arm_target_pos[env_ids] + self.scene.env_origins[env_ids, :3]
-        
-        # Keep default orientation (identity quaternion)
-        default_quat = torch.tensor([0.0, 1.0, 0.0,0.0], device=self.device)
-        new_quats = default_quat.unsqueeze(0).repeat(len(env_ids), 1)
-        
-        # Combine position and orientation
-        new_poses = torch.cat([new_positions, new_quats], dim=-1)
-        
-        # Write to simulation
-        self._arm.write_root_pose_to_sim(new_poses, env_ids=env_ids)
-        self._arm.write_root_velocity_to_sim(
-            torch.zeros((num_resets, 6), device=self.device),
-            env_ids=env_ids
-        )
+            
+            # Combine into position tensor
+            self._arm_target_pos[present_env_ids, 0] = random_x
+            self._arm_target_pos[present_env_ids, 1] = random_y
+            self._arm_target_pos[present_env_ids, 2] = random_z
+            
+            # Calculate world positions
+            new_positions = self._arm_target_pos[present_env_ids] + self.scene.env_origins[present_env_ids, :3]
+            
+            # Use correct identity quaternion format (x, y, z, w)
+            identity_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+            new_orientations = identity_quat.unsqueeze(0).repeat(num_present, 1)
+            
+            # Combine position and orientation
+            new_poses = torch.cat([new_positions, new_orientations], dim=-1)
+            
+            # Write to simulation - pass env_ids as tensor
+            self._arm.write_root_pose_to_sim(new_poses, env_ids=present_env_ids)
+            self._arm.write_root_velocity_to_sim(
+                torch.zeros((num_present, 6), device=self.device),
+                env_ids=present_env_ids
+            )
+
+        # Process environments where arm is absent
+        if len(absent_env_ids) > 0:
+            num_absent = len(absent_env_ids)
+            
+            # Set absent position
+            absent_position = torch.tensor(self.cfg.arm_absent_position, device=self.device)
+            self._arm_target_pos[absent_env_ids] = absent_position.unsqueeze(0).repeat(num_absent, 1)
+            
+            # Calculate world positions  
+            new_positions = self._arm_target_pos[absent_env_ids] + self.scene.env_origins[absent_env_ids, :3]
+            
+            # Use correct identity quaternion format
+            identity_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+            new_orientations = identity_quat.unsqueeze(0).repeat(num_absent, 1)
+            
+            # Combine position and orientation
+            new_poses = torch.cat([new_positions, new_orientations], dim=-1)
+            
+            # Write to simulation - pass env_ids as tensor
+            self._arm.write_root_pose_to_sim(new_poses, env_ids=absent_env_ids)
+            self._arm.write_root_velocity_to_sim(
+                torch.zeros((num_absent, 6), device=self.device),
+                env_ids=absent_env_ids
+            )
         
         # Reset target poses
         self._sample_target_poses_for_reset(env_ids)
@@ -1379,28 +1487,43 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         
         # Reset timers
         self._command_time_left[env_ids] = self.cfg.command_resampling_time
-        
+
     def _sample_target_poses_for_reset(self, env_ids: Sequence[int]):
         """Sample new target poses for reset environments."""
         num_resets = len(env_ids)
         
-        # Sample target poses
+        # Get current curriculum target range (includes orientation)
+        target_range = self._get_current_target_range()
+        
+        # Sample target poses using curriculum-adjusted ranges
         x = torch.rand(num_resets, device=self.device) * (
-            self.cfg.target_pose_range["x"][1] - self.cfg.target_pose_range["x"][0]
-        ) + self.cfg.target_pose_range["x"][0]
+            target_range["x"][1] - target_range["x"][0]
+        ) + target_range["x"][0]
         
         y = torch.rand(num_resets, device=self.device) * (
-            self.cfg.target_pose_range["y"][1] - self.cfg.target_pose_range["y"][0]
-        ) + self.cfg.target_pose_range["y"][0]
+            target_range["y"][1] - target_range["y"][0]
+        ) + target_range["y"][0]
         
         z = torch.rand(num_resets, device=self.device) * (
-            self.cfg.target_pose_range["z"][1] - self.cfg.target_pose_range["z"][0]
-        ) + self.cfg.target_pose_range["z"][0]
+            target_range["z"][1] - target_range["z"][0]
+        ) + target_range["z"][0]
         
-        # Fixed orientation for now
-        roll = torch.full((num_resets,), self.cfg.target_pose_range["roll"][0], device=self.device)
-        pitch = torch.full((num_resets,), self.cfg.target_pose_range["pitch"][0], device=self.device)
-        yaw = torch.full((num_resets,), self.cfg.target_pose_range["yaw"][0], device=self.device)
+        # Sample orientations using target_range
+        roll = sample_uniform(
+            target_range["roll"][0],
+            target_range["roll"][1],
+            (num_resets,), self.device
+        )
+        pitch = sample_uniform(
+            target_range["pitch"][0],
+            target_range["pitch"][1],
+            (num_resets,), self.device
+        )
+        yaw = sample_uniform(
+            target_range["yaw"][0],
+            target_range["yaw"][1],
+            (num_resets,), self.device
+        )
         
         # Convert euler to quaternion
         target_quat = math_utils.quat_from_euler_xyz(roll, pitch, yaw)
@@ -1408,6 +1531,34 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Update buffers
         self._target_poses[env_ids, :3] = torch.stack([x, y, z], dim=-1)
         self._target_poses[env_ids, 3:7] = target_quat
+
+        # FIXED: Debug print for first environment
+        if len(env_ids) <= 4:  # Only log for small resets
+            # Convert env_ids to list for .index() operation
+            env_ids_list = env_ids.tolist() if hasattr(env_ids, 'tolist') else list(env_ids)
+            if 0 in env_ids_list:
+                idx = env_ids_list.index(0)
+                print(f"[DEBUG] New target for env 0: pos=[{x[idx].item():.3f}, {y[idx].item():.3f}, {z[idx].item():.3f}], "
+                    f"Arm present: {self._arm_present[0].item()}")
+
+    def _get_current_target_range(self) -> dict:
+        """Get current target range based on curriculum level."""
+        if not self.cfg.curriculum_enabled:
+            return self.cfg.target_pose_range
+        
+        # Start with base target range (includes orientation)
+        target_range = self.cfg.target_pose_range.copy()
+        
+        # Update position ranges based on curriculum level
+        if self._curriculum_level < len(self.cfg.curriculum_target_ranges):
+            curriculum_range = self.cfg.curriculum_target_ranges[self._curriculum_level]
+        else:
+            curriculum_range = self.cfg.curriculum_target_ranges[-1]
+        
+        # Merge position ranges from curriculum
+        target_range.update(curriculum_range)
+        
+        return target_range
 
     def _set_debug_vis_impl(self, debug_vis:bool):
         # Create markers for visualizing the goal poses
@@ -1423,7 +1574,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         else:
             if hasattr(self, "target_pos_visualizer"):
                 self.target_pos_visualizer.set_visibility(False)
-
 
     # -------------------------------------------------------------------------
     # 1) MARK EPISODE BOUNDARIES
@@ -1513,9 +1663,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         if step % 10 == 0:
             print(f"[SAVE] Processed images saved to {self._image_obs_dir} at step {step}")
 
-
-
-
     def _debug_vis_callback(self, event):
         """Update debug visualization markers and save joint targets."""
         # Update target pose markers
@@ -1552,19 +1699,17 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
         self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
 
-
-        # self._save_joint_targets()
+        self._save_joint_targets()
 
         # # new: save state & image
-        # self._save_state_observations()
-        # self._save_image_observations()
+        self._save_state_observations()
+        self._save_image_observations()
         
         # Additionally log APF beta values for first few environments (every 10 steps)
         if self.common_step_counter % 10 == 0:
             # Log for first 3 environments
             for i in range(min(3, self.num_envs)):
                 print(f"[APF] Env {i}: dist={min_distances[i]:.3f}m, β={beta_values[i]:.3f}")
-                # print(f"Action Target sent to robot Env{i}: action {self._robot_dof_targets}")
 
     def _save_joint_targets(self):
         """Save joint targets for all environments at current timestep."""
@@ -1606,6 +1751,12 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         if hasattr(self, '_joint_targets_file') and self._joint_targets_file:
             self._joint_targets_file.close()
             print(f"Joint targets data saved to: {self._joint_targets_filename}")
+
+    def set_debug_vis(self, debug_vis: bool) -> None:
+        """Set debug visualization mode."""
+        self.cfg.debug_vis = debug_vis
+        if hasattr(self, "_ee_frame") and self._ee_frame is not None:
+            self._ee_frame.set_debug_vis(debug_vis)
 
 
 # Factory function for creating the environment

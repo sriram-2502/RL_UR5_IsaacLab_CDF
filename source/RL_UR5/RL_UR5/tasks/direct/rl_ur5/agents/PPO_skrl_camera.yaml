@@ -125,5 +125,5 @@ agent:
 # Sequential trainer configuration
 trainer:
   class: SequentialTrainer
-  timesteps: 50000  # Total training timesteps
+  timesteps: 150000  # Total training timesteps
   environment_info: log
