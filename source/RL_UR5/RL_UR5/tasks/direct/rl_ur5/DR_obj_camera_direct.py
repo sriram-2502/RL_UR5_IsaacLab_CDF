@@ -299,7 +299,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Visualization settings
     visualize_camera_interval = 10000  # Visualize camera every N steps
-    visualization_save_path = "/home/adi2440/Desktop/camera_obs/"  # Path to save visualizations
+    visualization_save_path = "/home/adi2440/Desktop/camera_obs"  # Path to save visualizations
 
     
     # Noise settings

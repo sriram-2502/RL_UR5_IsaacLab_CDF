@@ -73,7 +73,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     """Configuration for the direct RL environment."""
     
     # Visualization settings - MOVED TO TOP to fix reference issue
-    debug_vis = False # Enable/disable debug visualization
+    debug_vis = True # Enable/disable debug visualization
     
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
@@ -155,7 +155,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Frame transformer for end-effector
     ee_frame_cfg: FrameTransformerCfg = FrameTransformerCfg(
         prim_path="/World/envs/env_.*/Robot/base_link",
-        debug_vis=debug_vis,  # Now this works since enable_debug_vis is defined above
+        debug_vis=False,  # Now this works since enable_debug_vis is defined above
         visualizer_cfg=marker_cfg,
         target_frames=[
             FrameTransformerCfg.FrameCfg(
@@ -304,7 +304,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Visualization settings
     visualize_camera_interval = 20000  # Visualize camera every N steps
-    visualization_save_path = "/home/adi2440/Desktop/camera_obs/"  # Path to save visualizations
+    visualization_save_path = "/home/adi2440/Desktop/camera_obs"  # Path to save visualizations
 
     
     # Noise settings
@@ -1419,7 +1419,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
                 target_marker_cfg.prim_path = "/Visuals/Command/target_position"
                 self.target_pos_visualizer = VisualizationMarkers(target_marker_cfg)
             # Set target visibility to true
-            self.target_pos_visualizer.set_visibility(True)
+            self.target_pos_visualizer.set_visibility(False)
         else:
             if hasattr(self, "target_pos_visualizer"):
                 self.target_pos_visualizer.set_visibility(False)
@@ -1556,15 +1556,20 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # self._save_joint_targets()
 
         # # new: save state & image
-        # self._save_state_observations()
-        # self._save_image_observations()
+        self._save_state_observations()
+        self._save_image_observations()
         
         # Additionally log APF beta values for first few environments (every 10 steps)
-        if self.common_step_counter % 10 == 0:
+        if self.common_step_counter % 25 == 0:
+            self._save_state_observations()
+            self._save_image_observations()
             # Log for first 3 environments
             for i in range(min(3, self.num_envs)):
                 print(f"[APF] Env {i}: dist={min_distances[i]:.3f}m, β={beta_values[i]:.3f}")
                 # print(f"Action Target sent to robot Env{i}: action {self._robot_dof_targets}")
+
+
+
 
     def _save_joint_targets(self):
         """Save joint targets for all environments at current timestep."""

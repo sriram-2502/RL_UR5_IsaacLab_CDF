@@ -73,7 +73,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     """Configuration for the direct RL environment."""
     
     # Visualization settings - MOVED TO TOP to fix reference issue
-    debug_vis = False # Enable/disable debug visualization
+    debug_vis = True # Enable/disable debug visualization
     
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
@@ -152,7 +152,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Frame transformer for end-effector
     ee_frame_cfg: FrameTransformerCfg = FrameTransformerCfg(
         prim_path="/World/envs/env_.*/Robot/base_link",
-        debug_vis=debug_vis,  # Now this works since debug_vis is defined above
+        debug_vis=False,  # Now this works since debug_vis is defined above
         visualizer_cfg=marker_cfg,
         target_frames=[
             FrameTransformerCfg.FrameCfg(
@@ -227,14 +227,14 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     viewer = ViewerCfg(eye=(7.5, 7.5, 7.5), origin_type="world", env_index=0)
     
     # Arm presence settings
-    arm_presence_base_probability = 0.6  # Base 60% chance of arm being present
+    arm_presence_base_probability = 1.0  # Base 60% chance of arm being present
     arm_absent_position = (0.0, 0.0, -15.0)  # Position far away when arm is absent
     
     # Curriculum learning settings with arm presence
-    curriculum_enabled = True
+    curriculum_enabled = False
     curriculum_steps = [5000, 10000, 20000, 40000]  # Steps at which to increase difficulty
     curriculum_arm_speeds = [0.0, 0.1, 0.2, 0.3]  # Progressive arm movement speeds
-    curriculum_arm_presence_probs = [0.1, 0.3, 0.5, 0.6]  # Progressive arm presence probabilities
+    curriculum_arm_presence_probs = [0.5, 0.6, 0.7, 0.8]  # Progressive arm presence probabilities
     curriculum_target_ranges = [
         {"x": (0.55, 0.65), "y": (0.45, 0.5), "z": (-0.1, 0.1)},   # Easy
         {"x": (0.5, 0.7), "y": (0.4, 0.5), "z": (-0.15, 0.15)},    # Medium
@@ -264,7 +264,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
         "y": (-0.5, 0.5),
         "z": (0.80, 1.2),
     }
-    arm_movement_speed = 0.4  # Speed of random movement
+    arm_movement_speed = 0.5  # Speed of random movement
     
     # Reward settings
     reward_distance_weight = -2.5
@@ -274,7 +274,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     reward_torque_weight = -0.001
     reward_table_collision_weight = -4.0
     reward_arm_avoidance_weight = 7.0
-    reward_path_efficiency_weight = -0.5  # Penalty for inefficient paths when arm is absent
+    reward_path_efficiency_weight = -1.5  # Penalty for inefficient paths when arm is absent
     
     # Artificial Potential Field parameters
     apf_critical_distance = 0.15  # db - critical distance for obstacle avoidance
@@ -282,7 +282,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     energy_reward_weight = -1.0  # Weight for energy component
     
     # Huber loss parameters
-    huber_delta = 0.08  # Delta parameter for Huber loss
+    huber_delta = 0.1  # Delta parameter for Huber loss
     
     # Action filter settings
     action_filter_order = 2
@@ -291,7 +291,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Termination settings
     position_threshold = 0.05
-    orientation_threshold = 0.1
+    orientation_threshold = 0.05
     velocity_threshold = 0.05
     torque_threshold = 1.0
     bounds_safety_margin = 0.1  # 0.1m margin for bounds checking
@@ -302,7 +302,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Visualization settings
     visualize_camera_interval = 20000  # Visualize camera every N steps
-    visualization_save_path = "/home/adi2440/Desktop/camera_obs/"  # Path to save visualizations
+    visualization_save_path = "/home/adi2440/Desktop/camera_obs"  # Path to save visualizations
     
     # Noise settings
     joint_pos_noise_min = -0.01
@@ -1438,7 +1438,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             new_positions = self._arm_target_pos[present_env_ids] + self.scene.env_origins[present_env_ids, :3]
             
             # Use correct identity quaternion format (x, y, z, w)
-            identity_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+            identity_quat = torch.tensor([0.0, 1.0, 0.0, 0.0], device=self.device)
             new_orientations = identity_quat.unsqueeze(0).repeat(num_present, 1)
             
             # Combine position and orientation
@@ -1463,7 +1463,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             new_positions = self._arm_target_pos[absent_env_ids] + self.scene.env_origins[absent_env_ids, :3]
             
             # Use correct identity quaternion format
-            identity_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+            identity_quat = torch.tensor([0.0, 1.0, 0.0, 0.0], device=self.device)
             new_orientations = identity_quat.unsqueeze(0).repeat(num_absent, 1)
             
             # Combine position and orientation
