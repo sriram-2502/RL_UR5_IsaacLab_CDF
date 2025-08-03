@@ -73,14 +73,12 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     """Configuration for the direct RL environment."""
     
     # Visualization settings - MOVED TO TOP to fix reference issue
-    debug_vis = True # Enable/disable debug visualization
+    debug_vis = False # Enable/disable debug visualization
     
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
     marker_cfg.prim_path = "/Visuals/FrameTransformer"
     
-
-
     # UR5 Robot
     robot_cfg: ArticulationCfg = UR5_GRIPPER_CFG.replace(prim_path="/World/envs/env_.*/Robot")
 
@@ -130,7 +128,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     white_plane_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/white_plane",
         spawn=sim_utils.CuboidCfg(
-            size=(0.42112, 2.81, 0.01),
+            size=(0.5, 2.81, 0.01),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 rigid_body_enabled=True,
                 kinematic_enabled=True,
@@ -171,20 +169,25 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Camera
     tiled_camera: TiledCameraCfg = TiledCameraCfg(
         prim_path="/World/envs/env_.*/Camera",
-        data_types=["rgb"],
+        data_types=["rgb"],  # No depth as requested
         spawn=sim_utils.PinholeCameraCfg(
-            focal_length=2.208,
-            focus_distance=28.0,
-            horizontal_aperture=5.76,
-            vertical_aperture=3.24,
-            clipping_range=(0.1, 1000.0)
+            # ZED2 calculated parameters:
+            # fx = fy = 361.63 pixels -> focal_length = 2.955mm
+            # 1/3" CMOS sensor: 5.229 x 2.942 mm
+            focal_length=2.955,           # Changed from 2.208
+            focus_distance=28.0,          # Keep existing (focus distance for rendering)
+            horizontal_aperture=5.229,    # Changed from 5.76 (ZED2 sensor width)
+            vertical_aperture=2.942,      # Changed from 3.24 (ZED2 sensor height)
+            clipping_range=(0.1, 1000.0)  # Keep existing
         ),
-        width=224,
-        height=224,
+        # ZED2 resolution from camera_info
+        width=640,    # Matches ZED2 exactly
+        height=360,   # Matches ZED2 exactly
+        # Keep your existing camera pose
         offset=TiledCameraCfg.OffsetCfg(
-            pos=(1.27, 0.06, 1.143),
-            rot=(0.56099,0.43046,0.43406,0.56099),
-            convention="opengl"
+            pos=(1.27, 0.06, 1.143),                    # Unchanged
+            rot=(0.59637,0.37993,0.37993,0.59637),     # Unchanged
+            convention="opengl"                         # Unchanged
         )
     )
 
@@ -273,22 +276,22 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     reward_distance_weight = -2.5
     reward_distance_tanh_weight = 1.5
     reward_distance_tanh_std = 0.1
-    reward_orientation_weight = -0.2
+    reward_orientation_weight = -1.0
     reward_torque_weight = -0.001  # Replaced torque with action penalty
     reward_table_collision_weight = -4.0
-    reward_arm_avoidance_weight = 7.0  # Changed from obstacle
+    reward_arm_avoidance_weight = 8.0  # Changed from obstacle
     
     # Artificial Potential Field parameters
     apf_critical_distance = 0.15  # db - critical distance for obstacle avoidance
     apf_smoothness = 0.1  # ko - smoothness parameter for beta transition
-    energy_reward_weight = -1.0  # Weight for energy component
+    energy_reward_weight = -1.2  # Weight for energy component
     
     # Huber loss parameters
-    huber_delta = 0.08  # Delta parameter for Huber loss
+    huber_delta = 0.1  # Delta parameter for Huber loss
     
     # Action filter settings
     action_filter_order = 2
-    action_filter_cutoff_freq = 8.0
+    action_filter_cutoff_freq = 100.0
     action_filter_damping_ratio = 0.707
     
     # Termination settings
@@ -299,8 +302,8 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     bounds_safety_margin = 0.1  # 0.1m margin for bounds checking
     
     # Camera preprocessing settings
-    camera_crop_top = 80
-    camera_crop_bottom = 20
+    camera_crop_top = 30
+    camera_crop_bottom = 5
     
     # Visualization settings
     visualize_camera_interval = 20000  # Visualize camera every N steps
@@ -308,8 +311,8 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
 
     
     # Noise settings
-    joint_pos_noise_min = -0.05
-    joint_pos_noise_max = 0.05
+    joint_pos_noise_min = -0.01
+    joint_pos_noise_max = 0.01
     joint_vel_noise_min = -0.001
     joint_vel_noise_max = 0.001
     
@@ -421,7 +424,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self._table = RigidObject(self.cfg.table_cfg)
         self._white_plane = RigidObject(self.cfg.white_plane_cfg)
 
-        # --- clone source → env_1…env_N (env_0 keeps its prims) ---
+        # --- clone source  env_1&env_N (env_0 keeps its prims) ---
         self.scene.clone_environments(copy_from_source=False)
 
         # --- register handles in IsaacLab's scene registry ---
@@ -514,7 +517,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         """Apply actions before physics step."""
         # Store raw actions
-        self.actions = actions.clone().clamp(-3.5, 3.5)
+        self.actions = actions.clone().clamp(-1.0, 1.0)
 
         
         # Apply action filtering
@@ -885,7 +888,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         )
     
     def _compute_beta_transition(self, min_distances: torch.Tensor) -> torch.Tensor:
-        """Compute smooth transition factor β for adaptive reward mixing."""
+        """Compute smooth transition factor ² for adaptive reward mixing."""
         x = (min_distances - self.cfg.apf_critical_distance) / self.cfg.apf_smoothness
         beta = (torch.tanh(x) + 1.0) / 2.0
         return beta
@@ -932,7 +935,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             arm_half_extents
         )
         
-        # Compute β transition factor for APF
+        # Compute ² transition factor for APF
         beta = self._compute_beta_transition(min_distances_to_arm)
         
         # === Traditional Rewards (Rt) ===
@@ -955,14 +958,14 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         orientation_reward = self.cfg.reward_orientation_weight * orientation_huber_loss
         traditional_rewards += orientation_reward
         
-        # 4. Joint torque penalty
-        if hasattr(self._robot.data, 'applied_torque') and self._robot.data.applied_torque is not None:
-            joint_torques = self._robot.data.applied_torque[:, self._joint_indices]
-            torque_penalty = torch.sum(torch.square(joint_torques), dim=1)
-            torque_reward = self.cfg.reward_torque_weight * torque_penalty
-            rewards += torque_reward
-        else:
-            torque_reward = torch.zeros_like(rewards)
+        # # 4. Joint torque penalty
+        # if hasattr(self._robot.data, 'applied_torque') and self._robot.data.applied_torque is not None:
+        #     joint_torques = self._robot.data.applied_torque[:, self._joint_indices]
+        #     torque_penalty = torch.sum(torch.square(joint_torques), dim=1)
+        #     torque_reward = self.cfg.reward_torque_weight * torque_penalty
+        #     rewards += torque_reward
+        # else:
+        #     torque_reward = torch.zeros_like(rewards)
         
         # 5. Table collision penalty
         ee_height = ee_position[:, 2]
@@ -1002,7 +1005,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         energy_rewards = self._compute_energy_reward() * self.cfg.energy_reward_weight
         
         # === Adaptive Combination using APF ===
-        # Rada = β · Rt + (1 − β) · Renergy
+        # Rada = ² · Rt + (1  ²) · Renergy
         rewards = beta * traditional_rewards + (1.0 - beta) * energy_rewards
         
         # Track reward components for logging
@@ -1475,7 +1478,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             path = os.path.join('/home/adi2440/Desktop/state_data', fname)
             self._state_obs_file = open(path, 'w', newline='')
             self._state_csv_writer = csv.writer(self._state_obs_file)
-            # header: step, env_id, state_0 … state_N
+            # header: step, env_id, state_0 & state_N
             header = ['step', 'env_id'] + [f'state_{i}' for i in range(self.cfg.state_dim)]
             self._state_csv_writer.writerow(header)
 
@@ -1504,7 +1507,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
 
         # 2) For each env, convert to H×W×C and shift back into [0,1] for saving
         for env_id in range(self.num_envs):
-            proc = processed[env_id].transpose(1, 2, 0)      # → (H, W, C)
+            proc = processed[env_id].transpose(1, 2, 0)      #  (H, W, C)
             vis  = np.clip(proc + 0.5, 0.0, 1.0)             # undo mean subtraction
             fname = f"ep{self._episode_counter:03d}_step{step:06d}_env{env_id}.png"
             path  = os.path.join(self._image_obs_dir, fname)
@@ -1552,24 +1555,17 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
         self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
 
-
         # self._save_joint_targets()
 
-        # # new: save state & image
-        self._save_state_observations()
-        self._save_image_observations()
+        # # # new: save state & image
+        # self._save_state_observations()
+        # self._save_image_observations()
         
         # Additionally log APF beta values for first few environments (every 10 steps)
-        if self.common_step_counter % 25 == 0:
-            self._save_state_observations()
-            self._save_image_observations()
+        if self.common_step_counter % 10 == 0:
             # Log for first 3 environments
             for i in range(min(3, self.num_envs)):
                 print(f"[APF] Env {i}: dist={min_distances[i]:.3f}m, β={beta_values[i]:.3f}")
-                # print(f"Action Target sent to robot Env{i}: action {self._robot_dof_targets}")
-
-
-
 
     def _save_joint_targets(self):
         """Save joint targets for all environments at current timestep."""
@@ -1611,6 +1607,12 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         if hasattr(self, '_joint_targets_file') and self._joint_targets_file:
             self._joint_targets_file.close()
             print(f"Joint targets data saved to: {self._joint_targets_filename}")
+
+    def set_debug_vis(self, debug_vis: bool) -> None:
+        """Set debug visualization mode."""
+        self.cfg.debug_vis = debug_vis
+        if hasattr(self, "_ee_frame") and self._ee_frame is not None:
+            self._ee_frame.set_debug_vis(debug_vis)
 
 
 # Factory function for creating the environment

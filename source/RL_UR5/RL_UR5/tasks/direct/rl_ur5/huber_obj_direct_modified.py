@@ -152,7 +152,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Frame transformer for end-effector
     ee_frame_cfg: FrameTransformerCfg = FrameTransformerCfg(
         prim_path="/World/envs/env_.*/Robot/base_link",
-        debug_vis=False,  # Now this works since debug_vis is defined above
+        debug_vis=True,  # Now this works since debug_vis is defined above
         visualizer_cfg=marker_cfg,
         target_frames=[
             FrameTransformerCfg.FrameCfg(
@@ -189,7 +189,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Basic environment settings
     episode_length_s = 6.0
     decimation = 4
-    action_scale = 0.3  # Reduced for smoother movements
+    action_scale = 0.5  # Reduced for smoother movements
     state_dim = 13
     camera_target_height = 100
     camera_target_width = 120    
@@ -227,7 +227,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     viewer = ViewerCfg(eye=(7.5, 7.5, 7.5), origin_type="world", env_index=0)
     
     # Arm presence settings
-    arm_presence_base_probability = 1.0  # Base 60% chance of arm being present
+    arm_presence_base_probability = 0.0  # Base 60% chance of arm being present
     arm_absent_position = (0.0, 0.0, -15.0)  # Position far away when arm is absent
     
     # Curriculum learning settings with arm presence
@@ -267,10 +267,10 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     arm_movement_speed = 0.5  # Speed of random movement
     
     # Reward settings
-    reward_distance_weight = -2.5
-    reward_distance_tanh_weight = 1.5
+    reward_distance_weight = -2.0
+    reward_distance_tanh_weight = 1.0
     reward_distance_tanh_std = 0.1
-    reward_orientation_weight = -0.2
+    reward_orientation_weight = -1.0
     reward_torque_weight = -0.001
     reward_table_collision_weight = -4.0
     reward_arm_avoidance_weight = 7.0
@@ -283,11 +283,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Huber loss parameters
     huber_delta = 0.1  # Delta parameter for Huber loss
-    
-    # Action filter settings
-    action_filter_order = 2
-    action_filter_cutoff_freq = 2.0
-    action_filter_damping_ratio = 0.707
+
     
     # Termination settings
     position_threshold = 0.05
@@ -372,8 +368,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self._arm_present = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self._arm_presence_probability = self.cfg.arm_presence_base_probability
         
-        # Initialize action filter
-        self._setup_action_filter()
         
         # Curriculum learning state
         self._curriculum_level = 0
@@ -456,28 +450,6 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         dir_light_cfg = sim_utils.DistantLightCfg(intensity=1000.0, color=(1.0, 1.0, 0.9), angle=0.53)
         dir_light_cfg.func("/World/DirectionalLight", dir_light_cfg)
 
-    def _setup_action_filter(self):
-        """Initialize action filter states and coefficients."""
-        num_joints = len(self._joint_indices)
-        self._action_filter_x1 = torch.zeros((self.num_envs, num_joints), device=self.device)
-        self._action_filter_x2 = torch.zeros((self.num_envs, num_joints), device=self.device)
-        self._action_filter_y1 = torch.zeros((self.num_envs, num_joints), device=self.device)
-        self._action_filter_y2 = torch.zeros((self.num_envs, num_joints), device=self.device)
-        
-        # Calculate filter coefficients
-        if self.cfg.action_filter_order == 2:
-            omega = 2.0 * math.pi * self.cfg.action_filter_cutoff_freq
-            dt = self.cfg.sim.dt
-            k = omega * dt
-            a1 = k * k
-            a2 = k * 2.0 * self.cfg.action_filter_damping_ratio
-            a3 = a1 + a2 + 1.0
-            
-            self._filter_b0 = a1 / a3
-            self._filter_b1 = 2.0 * a1 / a3
-            self._filter_b2 = a1 / a3
-            self._filter_a1 = (2.0 * a1 - 2.0) / a3
-            self._filter_a2 = (a1 - a2 + 1.0) / a3
 
     def _update_curriculum_settings(self):
         """Update environment settings based on curriculum level."""
@@ -526,13 +498,11 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
     def _pre_physics_step(self, actions: torch.Tensor) -> None:
         """Apply actions before physics step."""
         # Store raw actions
-        self.actions = actions.clone().clamp(-3.5, 3.5)
-        
-        # Apply action filtering
-        filtered_actions = self._apply_action_filter(self.actions)
+        self.actions = actions.clone().clamp(-1.0, 1.0)
+    
         
         # Scale actions
-        self.actions = filtered_actions * self.cfg.action_scale
+        self.actions = self.actions * self.cfg.action_scale
         
         # Update command timer
         self._command_time_left -= self.physics_dt
@@ -571,37 +541,16 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             self._robot_dof_upper_limits - safety_margin
         )
         
-        # Apply velocity limits for safety
-        max_velocity = 1.5  # rad/s
-        velocity_command = (self._robot_dof_targets - current_joint_pos) / self.physics_dt
-        velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
-        self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
+        # # Apply velocity limits for safety
+        # max_velocity = 2.0 # rad/s
+        # velocity_command = (self._robot_dof_targets - current_joint_pos) / self.physics_dt
+        # velocity_command = torch.clamp(velocity_command, -max_velocity, max_velocity)
+        # self._robot_dof_targets = current_joint_pos + velocity_command * self.physics_dt
         
         # Set joint position targets
         self._robot.set_joint_position_target(
             self._robot_dof_targets, joint_ids=self._joint_indices
         )
-
-    def _apply_action_filter(self, actions: torch.Tensor) -> torch.Tensor:
-        """Apply second-order Butterworth filter to actions."""
-        if self.cfg.action_filter_order == 2:
-            filtered_actions = (
-                self._filter_b0 * actions +
-                self._filter_b1 * self._action_filter_x1 +
-                self._filter_b2 * self._action_filter_x2 -
-                self._filter_a1 * self._action_filter_y1 -
-                self._filter_a2 * self._action_filter_y2
-            )
-            
-            # Update filter memory
-            self._action_filter_x2 = self._action_filter_x1.clone()
-            self._action_filter_x1 = actions.clone()
-            self._action_filter_y2 = self._action_filter_y1.clone()
-            self._action_filter_y1 = filtered_actions.clone()
-            
-            return filtered_actions
-        else:
-            return actions
 
     def _sample_commands(self, env_ids: Sequence[int]) -> None:
         """Randomize the target poses for the given env indices."""
@@ -1479,11 +1428,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Reset target poses
         self._sample_target_poses_for_reset(env_ids)
         
-        # Reset action filter states
-        self._action_filter_x1[env_ids] = 0.0
-        self._action_filter_x2[env_ids] = 0.0
-        self._action_filter_y1[env_ids] = 0.0
-        self._action_filter_y2[env_ids] = 0.0
+
         
         # Reset timers
         self._command_time_left[env_ids] = self.cfg.command_resampling_time

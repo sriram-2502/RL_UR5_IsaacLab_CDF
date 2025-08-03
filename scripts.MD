@@ -26,3 +26,9 @@ python scripts/rl_games/play.py     --task=Isaac-UR5-ObjCameraPoseTracking-PPO  
 Livestream client IP address
 10.125.61.13
 vnode003
+
+
+## Scripts for Verification
+export MKL_THREADING_LAYER=GNU && export OMP_NUM_THREADS=1 && python runtime_verifier_abcrown.py
+
+##

@@ -81,14 +81,14 @@ memory:
 # PPO agent configuration
 agent:
   class: PPO
-  rollouts: 24  # Number of steps before update
+  rollouts: 64  # Number of steps before update
   learning_epochs: 10  # Number of epochs per update
-  mini_batches: 32  # Number of mini-batches per epoch
+  mini_batches: 8  # Number of mini-batches per epoch
   
   # Core PPO parameters
   discount_factor: 0.99
   lambda: 0.95
-  learning_rate: 5.0e-04  # Slightly lower for stability with images
+  learning_rate: 4.0e-04  # Slightly lower for stability with images
   learning_rate_scheduler: KLAdaptiveLR
   learning_rate_scheduler_kwargs:
     kl_threshold: 0.01
@@ -107,7 +107,7 @@ agent:
   grad_norm_clip: 1.0
   ratio_clip: 0.2
   value_clip: 0.2
-  entropy_loss_scale: 0.4 # Higher for exploration with visual input
+  entropy_loss_scale: 0.01 # Higher for exploration with visual input
   clip_predicted_values: True
   value_loss_scale: 1.0
   kl_threshold: 0.01
@@ -117,13 +117,16 @@ agent:
   # Experiment tracking
   experiment:
     directory: "./logs/skrl_camera_pose_tracking"
-    experiment_name: "ppo_multiobs"
+    experiment_name: "alienware_ppo_multiobs"
     write_interval: 100
     checkpoint_interval: 10000
     wandb: True  # Set to True if using Weights & Biases
+    wandb_kwargs:
+      project: "RL_UR5"
+      entity: "i2rLAB"
 
 # Sequential trainer configuration
 trainer:
   class: SequentialTrainer
-  timesteps: 150000  # Total training timesteps
+  timesteps: 200000  # Total training timesteps
   environment_info: log
