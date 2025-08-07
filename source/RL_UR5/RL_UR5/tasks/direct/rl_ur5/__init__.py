@@ -60,7 +60,6 @@ gym.register(
 )
 
 
-
 gym.register(
     id="Isaac-UR5-DirectPoseTracking-PPO",
     entry_point=f"{__name__}.simple_pose_tracking_direct:SimpleCameraPoseTrackingEnv",
@@ -68,5 +67,16 @@ gym.register(
     kwargs={
         "env_cfg_entry_point": f"{__name__}.simple_pose_tracking_direct:SimpleCameraPoseTrackingEnvCfg",
         "skrl_cfg_entry_point": f"{agents.__name__}:skrl_camera.yaml",
+    },
+)
+
+
+gym.register(
+    id="Isaac-UR5-CDF-PPO",
+    entry_point=f"{__name__}.ur5_sphere_cdf_env:SphereObstacleCDFEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.ur5_sphere_cdf_env:SphereObstacleCDFEnvCfg",
+        "skrl_cfg_entry_point": f"{agents.__name__}:PPO_skrl_CDF.yaml",
     },
 )

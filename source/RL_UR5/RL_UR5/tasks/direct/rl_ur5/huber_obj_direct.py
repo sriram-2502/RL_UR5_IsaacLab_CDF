@@ -73,7 +73,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     """Configuration for the direct RL environment."""
     
     # Visualization settings - MOVED TO TOP to fix reference issue
-    debug_vis = False # Enable/disable debug visualization
+    debug_vis = True # Enable/disable debug visualization
     
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
@@ -153,7 +153,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     # Frame transformer for end-effector
     ee_frame_cfg: FrameTransformerCfg = FrameTransformerCfg(
         prim_path="/World/envs/env_.*/Robot/base_link",
-        debug_vis=False,  # Now this works since enable_debug_vis is defined above
+        debug_vis=True,  # Now this works since enable_debug_vis is defined above
         visualizer_cfg=marker_cfg,
         target_frames=[
             FrameTransformerCfg.FrameCfg(
@@ -181,8 +181,8 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
             clipping_range=(0.1, 1000.0)  # Keep existing
         ),
         # ZED2 resolution from camera_info
-        width=640,    # Matches ZED2 exactly
-        height=360,   # Matches ZED2 exactly
+        width=224,    # Matches ZED2 exactly
+        height=224,   # Matches ZED2 exactly
         # Keep your existing camera pose
         offset=TiledCameraCfg.OffsetCfg(
             pos=(1.27, 0.06, 1.143),                    # Unchanged
@@ -200,7 +200,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     camera_target_width = 120    
 
     # Observation and action spaces
-    action_space = gym.spaces.Box(low=-3.5, high=3.5, shape=(6,))
+    action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(6,))
     state_space = 0
     ## For PPO
     observation_space = gym.spaces.Dict({
@@ -244,7 +244,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Success tracking for adaptive curriculum
     success_window_size = 100
-    curriculum_advance_threshold = 0.7  # Advance when success rate > 70%
+    curriculum_advance_threshold = 0.5  # Advance when success rate > 70%
 
     # Command/target pose settings
     target_pose_range = {
@@ -266,11 +266,11 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Human arm movement settings
     arm_position_bounds = {
-        "x": (0.80, 1.2),
+        "x": (1.0, 1.2),
         "y": (-0.5, 0.5),
         "z": (0.80, 1.2),
     }
-    arm_movement_speed = 0.4  # Speed of random movement
+    arm_movement_speed = 0.3  # Speed of random movement
     
     # Reward settings
     reward_distance_weight = -2.5
@@ -279,19 +279,19 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     reward_orientation_weight = -1.0
     reward_torque_weight = -0.001  # Replaced torque with action penalty
     reward_table_collision_weight = -4.0
-    reward_arm_avoidance_weight = 8.0  # Changed from obstacle
+    reward_arm_avoidance_weight = 7.0  # Changed from obstacle
     
     # Artificial Potential Field parameters
     apf_critical_distance = 0.15  # db - critical distance for obstacle avoidance
     apf_smoothness = 0.1  # ko - smoothness parameter for beta transition
-    energy_reward_weight = -1.2  # Weight for energy component
+    energy_reward_weight = -1.0  # Weight for energy component
     
     # Huber loss parameters
-    huber_delta = 0.1  # Delta parameter for Huber loss
+    huber_delta = 0.08  # Delta parameter for Huber loss
     
     # Action filter settings
     action_filter_order = 2
-    action_filter_cutoff_freq = 100.0
+    action_filter_cutoff_freq = 500.0
     action_filter_damping_ratio = 0.707
     
     # Termination settings
@@ -302,8 +302,8 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     bounds_safety_margin = 0.1  # 0.1m margin for bounds checking
     
     # Camera preprocessing settings
-    camera_crop_top = 30
-    camera_crop_bottom = 5
+    camera_crop_top = 80
+    camera_crop_bottom = 20
     
     # Visualization settings
     visualize_camera_interval = 20000  # Visualize camera every N steps
@@ -547,6 +547,8 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Update arm position
         self._update_arm_position()
 
+        # Update debug visualization if enabled
+        self._update_debug_visualization()
         
     def _apply_action(self) -> None:
         """Apply the processed actions to the robot with safety checks."""
@@ -959,13 +961,13 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         traditional_rewards += orientation_reward
         
         # # 4. Joint torque penalty
-        # if hasattr(self._robot.data, 'applied_torque') and self._robot.data.applied_torque is not None:
-        #     joint_torques = self._robot.data.applied_torque[:, self._joint_indices]
-        #     torque_penalty = torch.sum(torch.square(joint_torques), dim=1)
-        #     torque_reward = self.cfg.reward_torque_weight * torque_penalty
-        #     rewards += torque_reward
-        # else:
-        #     torque_reward = torch.zeros_like(rewards)
+        if hasattr(self._robot.data, 'applied_torque') and self._robot.data.applied_torque is not None:
+            joint_torques = self._robot.data.applied_torque[:, self._joint_indices]
+            torque_penalty = torch.sum(torch.square(joint_torques), dim=1)
+            torque_reward = self.cfg.reward_torque_weight * torque_penalty
+            rewards += torque_reward
+        else:
+            torque_reward = torch.zeros_like(rewards)
         
         # 5. Table collision penalty
         ee_height = ee_position[:, 2]
@@ -1043,6 +1045,11 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
             #       f"Energy: {env_0_data['energy_reward']:.3f}, "
             #       f"Total: {env_0_data['total_reward']:.3f}")
         
+                # Add this at the end:
+        if self.cfg.debug_vis and hasattr(self, "target_pos_visualizer"):
+            self._update_debug_visualization()
+
+
         return rewards
     
     def _compute_arm_avoidance_rewards(self) -> torch.Tensor:
@@ -1422,7 +1429,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
                 target_marker_cfg.prim_path = "/Visuals/Command/target_position"
                 self.target_pos_visualizer = VisualizationMarkers(target_marker_cfg)
             # Set target visibility to true
-            self.target_pos_visualizer.set_visibility(False)
+            self.target_pos_visualizer.set_visibility(True)
         else:
             if hasattr(self, "target_pos_visualizer"):
                 self.target_pos_visualizer.set_visibility(False)
@@ -1613,6 +1620,29 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         self.cfg.debug_vis = debug_vis
         if hasattr(self, "_ee_frame") and self._ee_frame is not None:
             self._ee_frame.set_debug_vis(debug_vis)
+        
+        self._set_debug_vis_impl(debug_vis)
+
+    def _update_debug_visualization(self):
+        """Update debug visualization markers - call this in your step loop."""
+        if not self.cfg.debug_vis or not hasattr(self, "target_pos_visualizer"):
+            return
+            
+        # Update target pose markers
+        robot_pos = self._robot.data.root_state_w[:, :3]
+        robot_quat = self._robot.data.root_state_w[:, 3:7]
+        
+        des_pos_b = self._target_poses[:, :3]
+        des_quat_b = self._target_poses[:, 3:7]
+        
+        # Transform to world frame
+        des_pos_w, _ = math_utils.combine_frame_transforms(
+            robot_pos, robot_quat, des_pos_b
+        )
+        des_quat_w = math_utils.quat_mul(robot_quat, des_quat_b)
+        
+        # Visualize the target positions
+        self.target_pos_visualizer.visualize(translations=des_pos_w, orientations=des_quat_w)
 
 
 # Factory function for creating the environment

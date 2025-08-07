@@ -116,13 +116,13 @@ agent:
   # mixed_precision: True
   # Experiment tracking
   experiment:
-    directory: "./logs/skrl_camera_pose_tracking"
-    experiment_name: "alienware_ppo_multiobs"
+    directory: "./logs/skrl_CDF"
+    experiment_name: "alienware_CDF"
     write_interval: 100
     checkpoint_interval: 10000
     wandb: True  # Set to True if using Weights & Biases
     wandb_kwargs:
-      project: "RL_UR5"
+      project: "CDF_RL"
       entity: "i2rLAB"
 
 # Sequential trainer configuration
