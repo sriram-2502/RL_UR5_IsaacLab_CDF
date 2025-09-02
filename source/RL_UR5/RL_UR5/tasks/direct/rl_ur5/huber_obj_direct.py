@@ -18,6 +18,7 @@ import gymnasium as gym
 
 # IsaacLab imports
 import isaaclab.sim as sim_utils
+print([attr for attr in dir(sim_utils) if 'material' in attr.lower() or 'surface' in attr.lower()])
 from isaaclab.assets import Articulation, ArticulationCfg, RigidObject, RigidObjectCfg
 from isaaclab.envs import DirectRLEnv, DirectRLEnvCfg, ViewerCfg
 from isaaclab.scene import InteractiveSceneCfg
@@ -73,7 +74,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     """Configuration for the direct RL environment."""
     
     # Visualization settings - MOVED TO TOP to fix reference issue
-    debug_vis = True # Enable/disable debug visualization
+    debug_vis = False # Enable/disable debug visualization
     
     marker_cfg = FRAME_MARKER_CFG.copy()
     marker_cfg.markers["frame"].scale = (0.1, 0.1, 0.1)
@@ -128,7 +129,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     white_plane_cfg: RigidObjectCfg = RigidObjectCfg(
         prim_path="/World/envs/env_.*/white_plane",
         spawn=sim_utils.CuboidCfg(
-            size=(0.5, 2.81, 0.01),
+            size=(0.762, 2.5, 0.01),
             rigid_props=sim_utils.RigidBodyPropertiesCfg(
                 rigid_body_enabled=True,
                 kinematic_enabled=True,
@@ -145,10 +146,51 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
             ),
         ),
         init_state=RigidObjectCfg.InitialStateCfg(
-            pos=(0.2, 0.0, 0.8),
+            pos=(0.2, 0.0, 0.74),
             rot=(0.70711, 0.0, 0.70711, 0.0)
         ),
     )
+
+    # I2R plane configuration with image texture
+    i2r_plane_cfg: RigidObjectCfg = RigidObjectCfg(
+        prim_path="/World/envs/env_.*/i2r_plane",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path="/home/adi2440/Desktop/ur5_isaacsim/usd/i2r_plane.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                rigid_body_enabled=True,
+                kinematic_enabled=True,
+                disable_gravity=True,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=False
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(0.21, -0.2, 0.93),
+            rot=(0.50000, 0.50000, 0.50000, 0.50000)
+        ),
+    )
+
+    # Clemson plane configuration with image texture
+    clemson_plane_cfg: RigidObjectCfg = RigidObjectCfg(
+        prim_path="/World/envs/env_.*/clemson_plane",
+        spawn=sim_utils.UsdFileCfg(
+            usd_path="/home/adi2440/Desktop/ur5_isaacsim/usd/clemson_plane.usd",
+            rigid_props=sim_utils.RigidBodyPropertiesCfg(
+                rigid_body_enabled=True,
+                kinematic_enabled=True,
+                disable_gravity=True,
+            ),
+            collision_props=sim_utils.CollisionPropertiesCfg(
+                collision_enabled=False
+            ),
+        ),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=(0.21, 0.2, 0.93),
+            rot=(0.50000, 0.50000, 0.50000, 0.50000)
+        ),
+    )
+
 
     # Frame transformer for end-effector
     ee_frame_cfg: FrameTransformerCfg = FrameTransformerCfg(
@@ -291,7 +333,7 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     
     # Action filter settings
     action_filter_order = 2
-    action_filter_cutoff_freq = 500.0
+    action_filter_cutoff_freq = 8.0
     action_filter_damping_ratio = 0.707
     
     # Termination settings
@@ -302,12 +344,12 @@ class ObjCameraPoseTrackingDirectEnvCfg(DirectRLEnvCfg):
     bounds_safety_margin = 0.1  # 0.1m margin for bounds checking
     
     # Camera preprocessing settings
-    camera_crop_top = 80
+    camera_crop_top = 60
     camera_crop_bottom = 20
     
     # Visualization settings
     visualize_camera_interval = 20000  # Visualize camera every N steps
-    visualization_save_path = "/home/adi2440/Desktop/camera_obs"  # Path to save visualizations
+    visualization_save_path = "/home/adi2440/Desktop/ur5_isaacsim/camera_obs"  # Path to save visualizations
 
     
     # Noise settings
@@ -423,6 +465,8 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Create static assets
         self._table = RigidObject(self.cfg.table_cfg)
         self._white_plane = RigidObject(self.cfg.white_plane_cfg)
+        self._clemson_plane = RigidObject(self.cfg.clemson_plane_cfg)
+        self._i2r_plane = RigidObject(self.cfg.i2r_plane_cfg)
 
         # --- clone source  env_1&env_N (env_0 keeps its prims) ---
         self.scene.clone_environments(copy_from_source=False)
@@ -436,6 +480,8 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
         # Add static assets to scene registry
         self.scene.rigid_objects["table"] = self._table
         self.scene.rigid_objects["white_plane"] = self._white_plane
+        self.scene.rigid_objects["clemson_plane"] = self._clemson_plane
+        self.scene.rigid_objects["i2r_plane"] = self._i2r_plane
 
         # --- add static geometry and lighting ---
         # Ground plane
@@ -444,7 +490,7 @@ class ObjCameraPoseTrackingDirectEnv(DirectRLEnv):
 
         # Multiple lights for better scene illumination
         # Main dome light
-        light_cfg = sim_utils.DomeLightCfg(intensity=2000.0, color=(0.9, 0.9, 0.9))
+        light_cfg = sim_utils.DomeLightCfg(intensity=1600.0, color=(0.9, 0.9, 0.9))
         light_cfg.func("/World/DomeLight", light_cfg)
         
         # Additional directional light for shadows

@@ -53,7 +53,7 @@ models:
         layers:
           - conv2d: {out_channels: 32, kernel_size: 8, stride: 4, padding: 0}
           - conv2d: {out_channels: 64, kernel_size: 4, stride: 2, padding: 0}
-          - conv2d: {out_channels: 64, kernel_size: 3, stride: 1, padding: 0}
+          - conv2d: {out_channels: 128, kernel_size: 3, stride: 1, padding: 0}
           - flatten
           - linear: 512
         activations: [relu, relu, relu, null, tanh]
@@ -61,13 +61,13 @@ models:
       # MLP encoder for state input  
       - name: proprioception
         input: OBSERVATIONS["state"]  # This will receive the 'state' key from observation dict
-        layers: [256, 128, 64]
-        activations: [ relu, relu, relu]
+        layers: [64, 32]
+        activations: [ relu, relu]
 
       # Fusion layer
       - name: net
         input: concatenate([camera_features, proprioception]) 
-        layers: [128, 64]
+        layers: [64, 32]
         activations: [relu, relu]
 
     # Single value output
@@ -81,7 +81,7 @@ memory:
 # PPO agent configuration
 agent:
   class: PPO
-  rollouts: 32  # Number of steps before update
+  rollouts: 64  # Number of steps before update
   learning_epochs: 10  # Number of epochs per update
   mini_batches: 8  # Number of mini-batches per epoch
   
@@ -128,5 +128,5 @@ agent:
 # Sequential trainer configuration
 trainer:
   class: SequentialTrainer
-  timesteps: 200000  # Total training timesteps
+  timesteps: 250000  # Total training timesteps
   environment_info: log
