@@ -1,5 +1,10 @@
 # UR5 Robotic Manipulation with Vision-Based RL in Isaac Lab
 
+Train CDF-RL
+```bash
+python scripts/skrl/train.py     --task=Isaac-UR5-CDF-PPO     --num_envs 2     --enable_cameras
+```
+
 <div align="center">
   <img src="gifs/i2r_clemson_ur5.png" width="100%">
   <br><br>
